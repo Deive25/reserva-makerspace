@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ReservaMakerspace.Api/ReservaMakerspace.Api.csproj" />
+    <Project Path="src/ReservaMakerspace.Dominio/ReservaMakerspace.Dominio.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ReservaMakerspace.Testes.Integracao/ReservaMakerspace.Testes.Integracao.csproj" />
+    <Project Path="tests/ReservaMakerspace.Testes.Unidade/ReservaMakerspace.Testes.Unidade.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,45 @@
+name: CI
+
+# Roda em push na main e em todo pull request. Push em outras branches so dispara o CI
+# quando houver PR aberto; assim um commit enviado para uma branch com PR nao roda duas vezes.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  testes:
+    name: Testes (build + unidade + integracao)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # A versao do SDK vem do global.json.
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restaurar
+        run: dotnet restore
+
+      - name: Compilar
+        run: dotnet build -c Release --no-restore
+
+      # Os testes de integracao sobem um PostgreSQL em container (Testcontainers); o ubuntu-latest ja tem Docker.
+      - name: Testar
+        run: dotnet test -c Release --no-build
+
+  # Roda em paralelo com os testes: garante que a imagem da API compila.
+  imagem:
+    name: Imagem Docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construir a imagem
+        run: docker build .
