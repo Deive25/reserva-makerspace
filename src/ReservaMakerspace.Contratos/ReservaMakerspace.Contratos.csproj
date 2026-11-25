@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\ReservaMakerspace.Dominio\ReservaMakerspace.Dominio.csproj" />
+  </ItemGroup>
+</Project>
