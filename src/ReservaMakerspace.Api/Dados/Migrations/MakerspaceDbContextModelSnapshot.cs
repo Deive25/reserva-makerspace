@@ -17,6 +17,7 @@ namespace ReservaMakerspace.Api.Dados.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
+                .HasAnnotation("Npgsql:CollationDefinition:nome_sem_diferenciar_caixa", "und-u-ks-level2,und-u-ks-level2,icu,False")
                 .HasAnnotation("ProductVersion", "10.0.15")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
@@ -197,6 +198,69 @@ namespace ReservaMakerspace.Api.Dados.Migrations
                     b.ToTable("usuarios", (string)null);
                 });
 
+            modelBuilder.Entity("ReservaMakerspace.Dominio.Equipamento", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Ativo")
+                        .HasColumnType("boolean")
+                        .HasColumnName("ativo");
+
+                    b.Property<string>("Nome")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("nome")
+                        .UseCollation("nome_sem_diferenciar_caixa");
+
+                    b.Property<Guid>("TipoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tipo_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_equipamentos");
+
+                    b.HasIndex("Nome")
+                        .IsUnique()
+                        .HasDatabaseName("ix_equipamentos_nome");
+
+                    b.HasIndex("TipoId")
+                        .HasDatabaseName("ix_equipamentos_tipo_id");
+
+                    b.ToTable("equipamentos", (string)null);
+                });
+
+            modelBuilder.Entity("ReservaMakerspace.Dominio.TipoDeEquipamento", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<TimeSpan>("DuracaoMaximaPessoal")
+                        .HasColumnType("interval")
+                        .HasColumnName("duracao_maxima_pessoal");
+
+                    b.Property<string>("Nome")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("nome")
+                        .UseCollation("nome_sem_diferenciar_caixa");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tipos_de_equipamento");
+
+                    b.HasIndex("Nome")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tipos_de_equipamento_nome");
+
+                    b.ToTable("tipos_de_equipamento", (string)null);
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserClaim<System.Guid>", b =>
                 {
                     b.HasOne("ReservaMakerspace.Api.Dados.Usuario", null)
@@ -225,6 +289,18 @@ namespace ReservaMakerspace.Api.Dados.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_usuarios_tokens_usuarios_user_id");
+                });
+
+            modelBuilder.Entity("ReservaMakerspace.Dominio.Equipamento", b =>
+                {
+                    b.HasOne("ReservaMakerspace.Dominio.TipoDeEquipamento", "Tipo")
+                        .WithMany()
+                        .HasForeignKey("TipoId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_equipamentos_tipos_de_equipamento_tipo_id");
+
+                    b.Navigation("Tipo");
                 });
 #pragma warning restore 612, 618
         }
