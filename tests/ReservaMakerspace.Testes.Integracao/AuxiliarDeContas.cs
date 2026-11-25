@@ -85,10 +85,22 @@ public sealed class AuxiliarDeContas(
     public async Task<ContaDeTeste> CoordenacaoInicialAsync()
     {
         _tokenDaCoordenacao ??= await EntrarAsync(coordenacaoEmail, coordenacaoSenha);
-        using var cliente = ClienteCom(_tokenDaCoordenacao);
-        var eu = await Json.LerAsync<UsuarioResposta>(
-            await cliente.GetAsync("/me", TestContext.Current.CancellationToken));
+        var resposta = await ConsultarEuAsync(_tokenDaCoordenacao);
+        if (resposta.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            // Com o relógio falso avançado, o token guardado venceu: entra de novo.
+            _tokenDaCoordenacao = await EntrarAsync(coordenacaoEmail, coordenacaoSenha);
+            resposta = await ConsultarEuAsync(_tokenDaCoordenacao);
+        }
+
+        var eu = await Json.LerAsync<UsuarioResposta>(resposta);
         return new ContaDeTeste(eu.Id, coordenacaoEmail, coordenacaoSenha, _tokenDaCoordenacao);
+    }
+
+    private async Task<HttpResponseMessage> ConsultarEuAsync(string token)
+    {
+        using var cliente = ClienteCom(token);
+        return await cliente.GetAsync("/me", TestContext.Current.CancellationToken);
     }
 
     /// <summary>Define o papel com a Coordenação inicial. Devolve a resposta para quem quiser conferir.</summary>
