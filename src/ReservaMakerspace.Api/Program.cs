@@ -40,8 +40,13 @@ builder.Services.AddProblemDetails(opcoes =>
 builder.Services
     // As chaves de `errors` seguem o nome do JSON (errors.senha), e não o da propriedade C# (Senha).
     .AddControllers(opcoes => opcoes.ModelMetadataDetailsProviders.Add(new SystemTextJsonValidationMetadataProvider()))
-    // Enums como texto ("Coordenacao"); número no lugar do nome é recusado.
-    .AddJsonOptions(opcoes => opcoes.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false)));
+    // Número só como número ("120" em texto é recusado, ao contrário do padrão do ASP.NET); enums como texto.
+    .AddJsonOptions(opcoes =>
+    {
+        opcoes.JsonSerializerOptions.NumberHandling = JsonNumberHandling.Strict;
+        // Enums como texto ("Coordenacao"); número no lugar do nome é recusado.
+        opcoes.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false));
+    });
 
 builder.Services.AddOpenApi(opcoes => opcoes.AddDocumentTransformer((documento, _, _) =>
 {
@@ -89,6 +94,16 @@ if (app.Configuration.GetValue("Banco:AplicarMigracoesNaSubida", true))
         servicos.GetRequiredService<UserManager<Usuario>>(),
         app.Configuration,
         app.Logger);
+
+    // Desligada por padrão: só o ambiente de desenvolvimento e o Compose ligam (ADR 0004).
+    if (app.Configuration.GetValue("DadosDeExemplo:Aplicar", false))
+    {
+        await DadosDeExemplo.AplicarAsync(
+            banco,
+            servicos.GetRequiredService<UserManager<Usuario>>(),
+            app.Configuration,
+            app.Logger);
+    }
 }
 
 app.Run();

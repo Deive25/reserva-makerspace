@@ -23,14 +23,31 @@ public class AutorizacaoTests(FabricaDaApi fabrica)
         { "GET", "/me" },
         { "GET", "/usuarios" },
         { "PUT", "/usuarios/00000000-0000-0000-0000-000000000001/papel" },
+        { "GET", "/tipos-de-equipamento" },
+        { "GET", "/tipos-de-equipamento/00000000-0000-0000-0000-000000000001" },
+        { "POST", "/tipos-de-equipamento" },
+        { "PUT", "/tipos-de-equipamento/00000000-0000-0000-0000-000000000001" },
+        { "GET", "/equipamentos" },
+        { "GET", "/equipamentos/00000000-0000-0000-0000-000000000001" },
+        { "POST", "/equipamentos" },
+        { "PUT", "/equipamentos/00000000-0000-0000-0000-000000000001" },
     };
 
+    // O corpo do pedido não importa aqui: o login e o papel são checados antes da validação do corpo.
     public static TheoryData<Papel, string, string> RotasDaCoordenacao => new()
     {
         { Papel.Usuario, "GET", "/usuarios" },
         { Papel.Equipe, "GET", "/usuarios" },
         { Papel.Usuario, "PUT", "/usuarios/00000000-0000-0000-0000-000000000001/papel" },
         { Papel.Equipe, "PUT", "/usuarios/00000000-0000-0000-0000-000000000001/papel" },
+        { Papel.Usuario, "POST", "/tipos-de-equipamento" },
+        { Papel.Equipe, "POST", "/tipos-de-equipamento" },
+        { Papel.Usuario, "PUT", "/tipos-de-equipamento/00000000-0000-0000-0000-000000000001" },
+        { Papel.Equipe, "PUT", "/tipos-de-equipamento/00000000-0000-0000-0000-000000000001" },
+        { Papel.Usuario, "POST", "/equipamentos" },
+        { Papel.Equipe, "POST", "/equipamentos" },
+        { Papel.Usuario, "PUT", "/equipamentos/00000000-0000-0000-0000-000000000001" },
+        { Papel.Equipe, "PUT", "/equipamentos/00000000-0000-0000-0000-000000000001" },
     };
 
     private static HttpRequestMessage Pedido(string metodo, string rota, string? token = null)

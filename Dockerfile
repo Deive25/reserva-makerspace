@@ -1,5 +1,6 @@
 # Estágio 1: compila e publica só a API.
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# A versão do SDK acompanha o global.json: a imagem e o CI compilam com o mesmo SDK.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.403 AS build
 WORKDIR /fonte
 
 # Primeiro só os arquivos de dependências: enquanto eles não mudam, o restore fica em cache.
