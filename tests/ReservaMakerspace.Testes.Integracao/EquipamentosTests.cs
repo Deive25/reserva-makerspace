@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using ReservaMakerspace.Contratos.Equipamentos;
+using ReservaMakerspace.Dominio;
 
 namespace ReservaMakerspace.Testes.Integracao;
 
@@ -240,5 +241,81 @@ public class EquipamentosTests(FabricaDaApi fabrica)
         Assert.Equal(HttpStatusCode.NotFound, get.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, put.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, naoGuid.StatusCode);
+    }
+
+    // ---- Reservas futuras (spec §4.6, plano do 1.5, decisão 9) ----
+
+    private static async Task ConferirConflitoComListaAsync(HttpResponseMessage resposta, int quantidade)
+    {
+        Assert.Equal(HttpStatusCode.Conflict, resposta.StatusCode);
+        Assert.Equal("application/problem+json", resposta.Content.Headers.ContentType?.MediaType);
+        using var corpo = await Json.DocumentoAsync(resposta);
+        Assert.Equal("Conflito", corpo.RootElement.GetProperty("title").GetString());
+        Assert.Equal(quantidade, corpo.RootElement.GetProperty("conflitos").GetArrayLength());
+    }
+
+    private static Task<HttpResponseMessage> AlterarAsync(
+        HttpClient cliente, EquipamentoResposta m, string? nome = null, Guid? tipoId = null, bool? ativo = null) =>
+        cliente.PutAsJsonAsync(
+            $"/equipamentos/{m.Id}",
+            new { nome = nome ?? m.Nome, tipoId = tipoId ?? m.TipoId, ativo = ativo ?? m.Ativo },
+            TestContext.Current.CancellationToken);
+
+    [Fact]
+    public async Task Desativar_ou_trocar_o_tipo_de_maquina_com_reserva_ativa_e_futura_da_409_com_a_lista_e_renomear_continua_livre()
+    {
+        var auxiliar = new AuxiliarDeReservas(fabrica.Contas);
+        using var coordenacao = await ClienteDaCoordenacaoAsync();
+        var tipo = await auxiliar.CriarTipoAsync();
+        var outroTipo = await auxiliar.CriarTipoAsync();
+        var maquina = await auxiliar.CriarMaquinaAsync(tipo.Id);
+        var pessoa = await auxiliar.PessoaTreinadaAsync(tipo.Id);
+        using var daPessoa = await auxiliar.ClienteAsync(pessoa);
+        var inicio = AuxiliarDeReservas.Daqui(TimeSpan.FromDays(1));
+        var reserva = await AuxiliarDeReservas.ReservarOkAsync(daPessoa, maquina.Id, inicio, inicio.AddHours(1));
+
+        await ConferirConflitoComListaAsync(await AlterarAsync(coordenacao, maquina, ativo: false), 1);
+        await ConferirConflitoComListaAsync(await AlterarAsync(coordenacao, maquina, tipoId: outroTipo.Id), 1);
+        // A máquina continua como estava.
+        var depois = await Json.LerAsync<EquipamentoResposta>(
+            await coordenacao.GetAsync($"/equipamentos/{maquina.Id}", TestContext.Current.CancellationToken));
+        Assert.Equal(maquina, depois);
+
+        // Renomear e salvar sem mudar o tipo nem o estado continuam livres.
+        var novoNome = NovoNome("Renomeada");
+        var renomeada = await AlterarAsync(coordenacao, maquina, nome: novoNome);
+        Assert.Equal(HttpStatusCode.OK, renomeada.StatusCode);
+        Assert.Equal(novoNome, (await Json.LerAsync<EquipamentoResposta>(renomeada)).Nome);
+
+        // Com a reserva cancelada, a máquina pode ser desativada, reativada e mudar de tipo.
+        Assert.Equal(HttpStatusCode.OK, (await AuxiliarDeReservas.CancelarAsync(daPessoa, reserva.Id)).StatusCode);
+        var atual = maquina with { Nome = novoNome };
+        var desativada = await AlterarAsync(coordenacao, atual, ativo: false);
+        Assert.Equal(HttpStatusCode.OK, desativada.StatusCode);
+        Assert.False((await Json.LerAsync<EquipamentoResposta>(desativada)).Ativo);
+        Assert.Equal(HttpStatusCode.OK, (await AlterarAsync(coordenacao, atual with { Ativo = false }, ativo: true)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await AlterarAsync(coordenacao, atual, tipoId: outroTipo.Id)).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_lista_do_409_traz_so_as_reservas_ativas_e_futuras_da_maquina()
+    {
+        var auxiliar = new AuxiliarDeReservas(fabrica.Contas);
+        using var coordenacao = await ClienteDaCoordenacaoAsync();
+        var tipo = await auxiliar.CriarTipoAsync();
+        var maquina = await auxiliar.CriarMaquinaAsync(tipo.Id);
+        var outraMaquina = await auxiliar.CriarMaquinaAsync(tipo.Id);
+        var pessoa = await auxiliar.PessoaTreinadaAsync(tipo.Id, Papel.Equipe);
+        using var daPessoa = await auxiliar.ClienteAsync(pessoa);
+        var inicio = AuxiliarDeReservas.Daqui(TimeSpan.FromDays(1));
+        var cancelada = await AuxiliarDeReservas.ReservarOkAsync(daPessoa, maquina.Id, inicio, inicio.AddHours(1), "DemandaDoParque");
+        Assert.Equal(HttpStatusCode.OK, (await AuxiliarDeReservas.CancelarAsync(daPessoa, cancelada.Id)).StatusCode);
+        await AuxiliarDeReservas.ReservarOkAsync(daPessoa, maquina.Id, inicio.AddHours(2), inicio.AddHours(3), "DemandaDoParque");
+        await AuxiliarDeReservas.ReservarOkAsync(daPessoa, maquina.Id, inicio.AddHours(5), inicio.AddHours(6), "DemandaDoParque");
+        await AuxiliarDeReservas.ReservarOkAsync(daPessoa, outraMaquina.Id, inicio, inicio.AddHours(1), "DemandaDoParque");
+
+        var resposta = await AlterarAsync(coordenacao, maquina, ativo: false);
+
+        await ConferirConflitoComListaAsync(resposta, 2);
     }
 }
