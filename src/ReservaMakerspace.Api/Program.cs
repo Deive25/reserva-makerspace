@@ -94,6 +94,16 @@ if (app.Configuration.GetValue("Banco:AplicarMigracoesNaSubida", true))
         servicos.GetRequiredService<UserManager<Usuario>>(),
         app.Configuration,
         app.Logger);
+
+    // Desligada por padrão: só o ambiente de desenvolvimento e o Compose ligam (ADR 0004).
+    if (app.Configuration.GetValue("DadosDeExemplo:Aplicar", false))
+    {
+        await DadosDeExemplo.AplicarAsync(
+            banco,
+            servicos.GetRequiredService<UserManager<Usuario>>(),
+            app.Configuration,
+            app.Logger);
+    }
 }
 
 app.Run();

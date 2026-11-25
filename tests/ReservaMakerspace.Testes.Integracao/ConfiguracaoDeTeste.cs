@@ -13,12 +13,17 @@ public static class ConfiguracaoDeTeste
         string chave,
         string? coordenacaoEmail = null,
         string? coordenacaoSenha = null,
-        bool aplicarMigracoes = true) => new()
+        bool aplicarMigracoes = true,
+        bool aplicarDadosDeExemplo = false,
+        string? senhaDeExemplo = null) => new()
     {
         ["ConnectionStrings:Makerspace"] = connectionString,
         ["Jwt:Chave"] = chave,
         ["CoordenacaoInicial:Email"] = coordenacaoEmail,
         ["CoordenacaoInicial:Senha"] = coordenacaoSenha,
         ["Banco:AplicarMigracoesNaSubida"] = aplicarMigracoes ? "true" : "false",
+        // O WebApplicationFactory roda em Development e leria o appsettings.Development.json: desligada por padrão.
+        ["DadosDeExemplo:Aplicar"] = aplicarDadosDeExemplo ? "true" : "false",
+        ["DadosDeExemplo:Senha"] = senhaDeExemplo,
     };
 }
