@@ -163,6 +163,47 @@ public class AutorizacaoTests(FabricaDaApi fabrica)
     }
 
     [Fact]
+    public async Task Token_com_nbf_depois_do_exp_responde_401()
+    {
+        var conta = await fabrica.Contas.CriarAsync(Papel.Usuario);
+        // Os dois instantes cabem na folga de 30 s: só a regra "nbf depois de exp" recusa este token.
+        // O descritor não aceita nbf depois de exp; por isso o payload é escrito à mão.
+        var agora = DateTimeOffset.UtcNow;
+        var nbf = agora.AddSeconds(20).ToUnixTimeSeconds();
+        var exp = agora.AddSeconds(10).ToUnixTimeSeconds();
+        var token = new JsonWebTokenHandler().CreateToken(
+            $$"""{"sub":"{{conta.Id}}","iss":"{{Emissor}}","aud":"{{Emissor}}","nbf":{{nbf}},"exp":{{exp}}}""",
+            new SigningCredentials(
+                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(fabrica.Chave)), SecurityAlgorithms.HmacSha256));
+
+        var resposta = await EnviarAsync("GET", "/me", token);
+
+        await ConferirProblemaAsync(resposta, HttpStatusCode.Unauthorized, "Não autenticado");
+    }
+
+    [Fact]
+    public async Task Token_vencido_ha_menos_que_a_folga_de_30_s_ainda_vale()
+    {
+        var conta = await fabrica.Contas.CriarAsync(Papel.Usuario);
+        var token = Emitir(conta.Id, fabrica.Chave, DateTime.UtcNow.AddHours(-1), DateTime.UtcNow.AddSeconds(-15));
+
+        var resposta = await EnviarAsync("GET", "/me", token);
+
+        Assert.Equal(HttpStatusCode.OK, resposta.StatusCode);
+    }
+
+    [Fact]
+    public async Task Token_com_nbf_no_futuro_dentro_da_folga_de_30_s_ja_vale()
+    {
+        var conta = await fabrica.Contas.CriarAsync(Papel.Usuario);
+        var token = Emitir(conta.Id, fabrica.Chave, DateTime.UtcNow.AddSeconds(15), DateTime.UtcNow.AddHours(1));
+
+        var resposta = await EnviarAsync("GET", "/me", token);
+
+        Assert.Equal(HttpStatusCode.OK, resposta.StatusCode);
+    }
+
+    [Fact]
     public async Task Token_assinado_com_outra_chave_responde_401()
     {
         var conta = await fabrica.Contas.CriarAsync(Papel.Usuario);

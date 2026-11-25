@@ -50,7 +50,7 @@ Os treinamentos de exemplo (as datas são relativas ao momento da subida) mostra
 | Beto Bolsista | os 4 tipos (válidos, há 6 meses) e um registro antigo de Impressora 3D FDM (vencido, há 18 meses, o histórico antes da renovação) |
 | Carla Coordenadora | Cortadora a laser (válido, há 1 mês) |
 
-Sem `EXEMPLO_SENHA`, entram só os tipos e as máquinas. Eles entram só se ainda não houver nenhum treinamento, e as datas envelhecem num banco que dura meses. Os dados de exemplo só são criados, nunca alterados: subir de novo não duplica nada, e uma máquina renomeada ou uma pessoa rebaixada continuam como estão. Fora do Compose, a opção `DadosDeExemplo:Aplicar` vem desligada (só o `appsettings.Development.json` a liga).
+Sem `EXEMPLO_SENHA`, entram só os tipos e as máquinas. Os treinamentos de exemplo só entram se o banco ainda não tiver nenhum treinamento. Como as datas são contadas a partir da subida que os criou, num banco que dura meses elas envelhecem: o "válido, há 2 meses" um dia vence. Os dados de exemplo só são criados, nunca alterados: subir de novo não duplica nada, e uma máquina renomeada ou uma pessoa rebaixada continuam como estão. Fora do Compose, a opção `DadosDeExemplo:Aplicar` vem desligada (só o `appsettings.Development.json` a liga).
 
 **Entrar no Scalar:** faça `POST /auth/login` com o e-mail e a senha da Coordenação, copie o `token` da resposta e cole no campo *Bearer* de autenticação do Scalar. Dali em diante, as chamadas já vão com o token. Ele vale 60 minutos.
 
@@ -77,6 +77,7 @@ Rotas de treinamentos:
 | `GET /me/treinamentos` | Qualquer pessoa logada | Só os treinamentos da própria pessoa, com a situação, quem registrou e, se houver, quem revogou e por quê |
 
 "Equipe" vale também para a Coordenação. Não há `PUT` nem `DELETE`: o histórico não se apaga, e revogar é a única mudança.
+
 ## Como testar
 
 ```bash
