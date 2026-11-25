@@ -1,4 +1,5 @@
 using Npgsql;
+using ReservaMakerspace.Contratos.Reservas;
 using ReservaMakerspace.Contratos.Treinamentos;
 using ReservaMakerspace.Dominio;
 
@@ -269,6 +270,134 @@ public class DadosDeExemploTests(BancosDeTeste bancos) : IClassFixture<BancosDeT
 
         // Os 3 treinamentos da cortadora (Ana, Beto e Carla) saem; ficam 6.
         Assert.Equal(6, await ContarAsync(connectionString, TotalDeTreinamentos));
+    }
+
+    private const string TotalDeReservas = "SELECT count(*) FROM reservas";
+
+    private static async Task<List<ReservaResposta>> MinhasReservasAsync(FabricaSemBanco fabrica, string email, string senha)
+    {
+        var contas = new AuxiliarDeContas(fabrica, "", "");
+        using var cliente = contas.ClienteCom(await contas.EntrarAsync(email, senha));
+        var resposta = await cliente.GetAsync("/me/reservas", TestContext.Current.CancellationToken);
+        Assert.Equal(System.Net.HttpStatusCode.OK, resposta.StatusCode);
+        return await Json.LerAsync<List<ReservaResposta>>(resposta);
+    }
+
+    private static readonly TimeSpan Brasilia = TimeSpan.FromHours(-3);
+
+    /// <summary>Quantos dias, no calendário de Brasília, o instante está depois de hoje (negativo: antes).</summary>
+    private static int DiasDeHoje(DateTimeOffset instante) =>
+        (instante.ToOffset(Brasilia).Date - TimeProvider.System.GetUtcNow().ToOffset(Brasilia).Date).Days;
+
+    [Fact]
+    public async Task As_reservas_de_exemplo_tem_ativas_passada_e_canceladas_e_a_Ana_ve_as_4_dela_no_login()
+    {
+        var connectionString = await bancos.NovoBancoAsync();
+        var senha = AuxiliarDeContas.NovaSenha();
+        await using var fabrica = Fabrica(connectionString, senha: senha);
+        using var cliente = fabrica.CreateClient();
+
+        Assert.Equal(7, await ContarAsync(connectionString, TotalDeReservas));
+        Assert.Equal(5, await ContarAsync(connectionString, "SELECT count(*) FROM reservas WHERE situacao = 'Ativa'"));
+        Assert.Equal(1, await ContarAsync(connectionString, "SELECT count(*) FROM reservas WHERE situacao = 'CanceladaPelaEquipe'"));
+        Assert.Equal(1, await ContarAsync(connectionString, "SELECT count(*) FROM reservas WHERE situacao = 'CanceladaPeloDono'"));
+
+        var daAna = await MinhasReservasAsync(fabrica, EmailDaAna, senha);
+        Assert.Equal(4, daAna.Count);
+        // Do início mais recente para o mais antigo: depois de amanhã, amanhã, ontem e há 5 dias.
+        Assert.Equal(
+            ["Impressora FDM 2", "Impressora FDM 1", "Impressora FDM 3", "Impressora de resina"],
+            daAna.Select(r => r.EquipamentoNome));
+        Assert.All(daAna, r => Assert.Equal(FinalidadeDaReserva.ProjetoPessoal, r.Finalidade));
+
+        var daFdm2 = daAna[0];
+        Assert.Equal(SituacaoDaReserva.CanceladaPeloDono, daFdm2.Situacao);
+        Assert.Equal("Ana Aluna", daFdm2.CanceladaPorNome);
+        Assert.Equal(2, DiasDeHoje(daFdm2.Inicio));
+        Assert.Equal(TimeSpan.FromHours(4), daFdm2.Fim - daFdm2.Inicio);
+
+        var daFdm1 = daAna[1];
+        Assert.Equal(SituacaoDaReserva.Ativa, daFdm1.Situacao);
+        Assert.Equal("Suporte de celular", daFdm1.Descricao);
+        Assert.Equal(1, DiasDeHoje(daFdm1.Inicio));
+        Assert.Equal(9, daFdm1.Inicio.ToOffset(Brasilia).Hour);
+        Assert.Equal(13, daFdm1.Fim.ToOffset(Brasilia).Hour);
+
+        var passada = daAna[2];
+        Assert.Equal(SituacaoDaReserva.Ativa, passada.Situacao);
+        Assert.Equal(-1, DiasDeHoje(passada.Inicio));
+        Assert.Equal(14, passada.Inicio.ToOffset(Brasilia).Hour);
+        Assert.True(passada.Fim < TimeProvider.System.GetUtcNow());
+
+        var revogada = daAna[3];
+        Assert.Equal(SituacaoDaReserva.CanceladaPelaEquipe, revogada.Situacao);
+        Assert.Equal("Treinamento revogado", revogada.MotivoDoCancelamento);
+        Assert.Equal("Beto Bolsista", revogada.CanceladaPorNome);
+        Assert.Equal(-5, DiasDeHoje(revogada.Inicio));
+        // Cancelada há 7 dias, a mesma data da revogação do treinamento de exemplo.
+        Assert.InRange(
+            TimeProvider.System.GetUtcNow() - revogada.CanceladaEm!.Value,
+            TimeSpan.FromDays(7) - TimeSpan.FromHours(1),
+            TimeSpan.FromDays(7) + TimeSpan.FromHours(1));
+
+        var doBeto = await MinhasReservasAsync(fabrica, EmailDoBeto, senha);
+        Assert.Equal(2, doBeto.Count);
+        var resina = doBeto[0];
+        var laser = doBeto[1];
+        Assert.Equal("Impressora de resina", resina.EquipamentoNome);
+        Assert.Equal(FinalidadeDaReserva.DemandaDoParque, resina.Finalidade);
+        Assert.Equal(TimeSpan.FromHours(8), resina.Fim - resina.Inicio);
+        Assert.Equal(3, DiasDeHoje(resina.Inicio));
+        Assert.Equal("Cortadora a laser", laser.EquipamentoNome);
+        Assert.Equal(FinalidadeDaReserva.DemandaDoParque, laser.Finalidade);
+        Assert.Equal("Prof. Daniel (TCC de Engenharia)", laser.Solicitante);
+        Assert.Equal(TimeSpan.FromHours(4), laser.Fim - laser.Inicio);
+
+        var daCarla = Assert.Single(await MinhasReservasAsync(fabrica, EmailDaCarla, senha));
+        Assert.Equal("Cortadora a laser", daCarla.EquipamentoNome);
+        Assert.Equal(FinalidadeDaReserva.ProjetoPessoal, daCarla.Finalidade);
+        Assert.Equal(TimeSpan.FromHours(1), daCarla.Fim - daCarla.Inicio);
+        Assert.Equal(2, DiasDeHoje(daCarla.Inicio));
+    }
+
+    [Fact]
+    public async Task Subir_de_novo_nao_duplica_as_reservas_e_sem_a_senha_nenhuma_reserva_entra()
+    {
+        var connectionString = await bancos.NovoBancoAsync();
+        var senha = AuxiliarDeContas.NovaSenha();
+        await using (var primeira = Fabrica(connectionString, senha: senha))
+        {
+            using var cliente = primeira.CreateClient();
+        }
+
+        await using (var segunda = Fabrica(connectionString, senha: senha))
+        {
+            using var outroCliente = segunda.CreateClient();
+        }
+
+        Assert.Equal(7, await ContarAsync(connectionString, TotalDeReservas));
+
+        var semSenha = await bancos.NovoBancoAsync();
+        await using var fabricaSemSenha = Fabrica(semSenha, senha: null);
+        using var terceiroCliente = fabricaSemSenha.CreateClient();
+        Assert.Equal(0, await ContarAsync(semSenha, TotalDeReservas));
+    }
+
+    [Fact]
+    public async Task Tipo_renomeado_deixa_de_fora_so_as_reservas_que_dependem_do_treinamento_dele_sem_erro()
+    {
+        var connectionString = await bancos.NovoBancoAsync();
+        await using (var primeira = Fabrica(connectionString, aplicar: true, senha: null))
+        {
+            using var cliente = primeira.CreateClient();
+        }
+
+        await ExecutarAsync(connectionString, "UPDATE tipos_de_equipamento SET nome = 'Laser renomeado' WHERE nome = 'Cortadora a laser'");
+        await using var segunda = Fabrica(connectionString, senha: AuxiliarDeContas.NovaSenha());
+        using var outroCliente = segunda.CreateClient();
+
+        // Sem os treinamentos de laser, saem a demanda do Beto e a pessoal da Carla; ficam as 5 outras.
+        Assert.Equal(5, await ContarAsync(connectionString, TotalDeReservas));
     }
 
     private static string PessoaComPapel(string email, string papel) =>
