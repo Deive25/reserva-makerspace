@@ -137,6 +137,32 @@ public class AutorizacaoTests(FabricaDaApi fabrica)
     }
 
     [Fact]
+    public async Task Token_com_nbf_no_futuro_responde_401()
+    {
+        var conta = await fabrica.Contas.CriarAsync(Papel.Usuario);
+        var token = Emitir(conta.Id, fabrica.Chave, DateTime.UtcNow.AddHours(1), DateTime.UtcNow.AddHours(2));
+
+        var resposta = await EnviarAsync("GET", "/me", token);
+
+        await ConferirProblemaAsync(resposta, HttpStatusCode.Unauthorized, "Não autenticado");
+    }
+
+    [Fact]
+    public async Task Token_sem_exp_responde_401()
+    {
+        var conta = await fabrica.Contas.CriarAsync(Papel.Usuario);
+        // Com o descritor, a biblioteca põe um exp padrão; por isso o payload é escrito à mão.
+        var token = new JsonWebTokenHandler().CreateToken(
+            $$"""{"sub":"{{conta.Id}}","iss":"{{Emissor}}","aud":"{{Emissor}}"}""",
+            new SigningCredentials(
+                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(fabrica.Chave)), SecurityAlgorithms.HmacSha256));
+
+        var resposta = await EnviarAsync("GET", "/me", token);
+
+        await ConferirProblemaAsync(resposta, HttpStatusCode.Unauthorized, "Não autenticado");
+    }
+
+    [Fact]
     public async Task Token_assinado_com_outra_chave_responde_401()
     {
         var conta = await fabrica.Contas.CriarAsync(Papel.Usuario);
