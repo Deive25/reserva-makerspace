@@ -19,11 +19,19 @@ public class MakerspaceDbContext(DbContextOptions<MakerspaceDbContext> opcoes)
 
     public const string IndiceDoNomeDaMaquina = "ix_equipamentos_nome";
 
+    /// <summary>
+    /// A restrição de exclusão das reservas. O EF Core não modela <c>EXCLUDE</c>: ela entra por SQL na migração
+    /// <c>Reservas</c> (e sai no <c>Down</c>), com este nome fixo, e a violação (23P01) vira 409 (ADR 0006).
+    /// </summary>
+    public const string RestricaoDeSobreposicaoDasReservas = "ex_reservas_sem_sobreposicao";
+
     public DbSet<TipoDeEquipamento> TiposDeEquipamento => Set<TipoDeEquipamento>();
 
     public DbSet<Equipamento> Equipamentos => Set<Equipamento>();
 
     public DbSet<Treinamento> Treinamentos => Set<Treinamento>();
+
+    public DbSet<Reserva> Reservas => Set<Reserva>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -65,6 +73,26 @@ public class MakerspaceDbContext(DbContextOptions<MakerspaceDbContext> opcoes)
             treinamento.HasOne<TipoDeEquipamento>().WithMany().HasForeignKey(t => t.TipoId).OnDelete(DeleteBehavior.Restrict);
             treinamento.HasOne<Usuario>().WithMany().HasForeignKey(t => t.RegistradoPorId).OnDelete(DeleteBehavior.Restrict);
             treinamento.HasOne<Usuario>().WithMany().HasForeignKey(t => t.RevogadoPorId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // A reserva segue o padrão do treinamento: chaves para usuarios declaradas aqui, sem cascata.
+        // Atenção: a tabela tem uma restrição de exclusão (RestricaoDeSobreposicaoDasReservas) que NÃO aparece neste
+        // modelo, porque o EF Core não a conhece. Ela vem da migração Reservas, por SQL; ao recriar ou apagar essa
+        // migração, a restrição precisa ser recriada à mão. O CHECK (fim > inicio) está declarado abaixo.
+        modelBuilder.Entity<Reserva>(reserva =>
+        {
+            reserva.ToTable("reservas", tabela => tabela.HasCheckConstraint("ck_reservas_fim_depois_do_inicio", "fim > inicio"));
+            reserva.HasKey(r => r.Id);
+            reserva.Property(r => r.Finalidade).HasConversion<string>().HasMaxLength(20);
+            reserva.Property(r => r.Situacao).HasConversion<string>().HasMaxLength(30);
+            reserva.Property(r => r.Solicitante).HasMaxLength(100);
+            reserva.Property(r => r.Descricao).HasMaxLength(500);
+            reserva.Property(r => r.MotivoDoCancelamento).HasMaxLength(500);
+            // Atende "as reservas da pessoa": /me/reservas, o limite de 2 pessoais e a revogação do treinamento.
+            reserva.HasIndex(r => r.OperadorId);
+            reserva.HasOne<Equipamento>().WithMany().HasForeignKey(r => r.EquipamentoId).OnDelete(DeleteBehavior.Restrict);
+            reserva.HasOne<Usuario>().WithMany().HasForeignKey(r => r.OperadorId).OnDelete(DeleteBehavior.Restrict);
+            reserva.HasOne<Usuario>().WithMany().HasForeignKey(r => r.CanceladaPorId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Usuario>(usuario =>

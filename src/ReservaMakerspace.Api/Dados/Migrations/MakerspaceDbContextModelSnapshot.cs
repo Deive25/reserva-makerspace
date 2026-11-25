@@ -233,6 +233,86 @@ namespace ReservaMakerspace.Api.Dados.Migrations
                     b.ToTable("equipamentos", (string)null);
                 });
 
+            modelBuilder.Entity("ReservaMakerspace.Dominio.Reserva", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("CanceladaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("cancelada_em");
+
+                    b.Property<Guid?>("CanceladaPorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cancelada_por_id");
+
+                    b.Property<DateTimeOffset>("CriadaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criada_em");
+
+                    b.Property<string>("Descricao")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("descricao");
+
+                    b.Property<Guid>("EquipamentoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("equipamento_id");
+
+                    b.Property<DateTimeOffset>("Fim")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fim");
+
+                    b.Property<string>("Finalidade")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("finalidade");
+
+                    b.Property<DateTimeOffset>("Inicio")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("inicio");
+
+                    b.Property<string>("MotivoDoCancelamento")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("motivo_do_cancelamento");
+
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operador_id");
+
+                    b.Property<string>("Situacao")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("situacao");
+
+                    b.Property<string>("Solicitante")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("solicitante");
+
+                    b.HasKey("Id")
+                        .HasName("pk_reservas");
+
+                    b.HasIndex("CanceladaPorId")
+                        .HasDatabaseName("ix_reservas_cancelada_por_id");
+
+                    b.HasIndex("EquipamentoId")
+                        .HasDatabaseName("ix_reservas_equipamento_id");
+
+                    b.HasIndex("OperadorId")
+                        .HasDatabaseName("ix_reservas_operador_id");
+
+                    b.ToTable("reservas", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_reservas_fim_depois_do_inicio", "fim > inicio");
+                        });
+                });
+
             modelBuilder.Entity("ReservaMakerspace.Dominio.TipoDeEquipamento", b =>
                 {
                     b.Property<Guid>("Id")
@@ -359,6 +439,29 @@ namespace ReservaMakerspace.Api.Dados.Migrations
                         .HasConstraintName("fk_equipamentos_tipos_de_equipamento_tipo_id");
 
                     b.Navigation("Tipo");
+                });
+
+            modelBuilder.Entity("ReservaMakerspace.Dominio.Reserva", b =>
+                {
+                    b.HasOne("ReservaMakerspace.Api.Dados.Usuario", null)
+                        .WithMany()
+                        .HasForeignKey("CanceladaPorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_reservas_asp_net_users_cancelada_por_id");
+
+                    b.HasOne("ReservaMakerspace.Dominio.Equipamento", null)
+                        .WithMany()
+                        .HasForeignKey("EquipamentoId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_reservas_equipamentos_equipamento_id");
+
+                    b.HasOne("ReservaMakerspace.Api.Dados.Usuario", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_reservas_asp_net_users_operador_id");
                 });
 
             modelBuilder.Entity("ReservaMakerspace.Dominio.Treinamento", b =>
