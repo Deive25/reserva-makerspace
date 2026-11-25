@@ -6,6 +6,7 @@ using Microsoft.OpenApi;
 using ReservaMakerspace.Api.Autenticacao;
 using ReservaMakerspace.Api.Dados;
 using ReservaMakerspace.Api.Erros;
+using ReservaMakerspace.Api.Json;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -46,6 +47,8 @@ builder.Services
         opcoes.JsonSerializerOptions.NumberHandling = JsonNumberHandling.Strict;
         // Enums como texto ("Coordenacao"); número no lugar do nome é recusado.
         opcoes.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false));
+        // Horários só com o fuso explícito (Z ou -03:00): sem ele, o .NET leria no fuso do servidor.
+        opcoes.JsonSerializerOptions.Converters.Add(new ConversorDeDataComFuso());
     });
 
 builder.Services.AddOpenApi(opcoes => opcoes.AddDocumentTransformer((documento, _, _) =>
