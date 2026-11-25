@@ -30,7 +30,7 @@ public class MakerspaceDbContext(DbContextOptions<MakerspaceDbContext> opcoes)
         // Necessária para a restrição de exclusão das reservas (incremento 1.5).
         modelBuilder.HasPostgresExtension("btree_gist");
 
-        // Colação ICU não determinística, nível 2: ignora a caixa e considera os acentos (ADR do 1.3, decisão 4).
+        // Colação ICU não determinística, nível 2: ignora a caixa e considera os acentos (decisão 4 do plano do 1.3).
         modelBuilder.HasCollation(ColacaoDoNome, locale: "und-u-ks-level2", provider: "icu", deterministic: false);
 
         modelBuilder.Entity<TipoDeEquipamento>(tipo =>
