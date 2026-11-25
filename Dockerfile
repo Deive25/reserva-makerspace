@@ -5,6 +5,7 @@ WORKDIR /fonte
 # Primeiro só os arquivos de dependências: enquanto eles não mudam, o restore fica em cache.
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY src/ReservaMakerspace.Dominio/ReservaMakerspace.Dominio.csproj src/ReservaMakerspace.Dominio/
+COPY src/ReservaMakerspace.Contratos/ReservaMakerspace.Contratos.csproj src/ReservaMakerspace.Contratos/
 COPY src/ReservaMakerspace.Api/ReservaMakerspace.Api.csproj src/ReservaMakerspace.Api/
 RUN dotnet restore src/ReservaMakerspace.Api/ReservaMakerspace.Api.csproj
 

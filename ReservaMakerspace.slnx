@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/ReservaMakerspace.Api/ReservaMakerspace.Api.csproj" />
+    <Project Path="src/ReservaMakerspace.Contratos/ReservaMakerspace.Contratos.csproj" />
     <Project Path="src/ReservaMakerspace.Dominio/ReservaMakerspace.Dominio.csproj" />
   </Folder>
   <Folder Name="/tests/">

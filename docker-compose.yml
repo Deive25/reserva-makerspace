@@ -27,6 +27,11 @@ services:
       # A senha vai à parte, pela variável PGPASSWORD que o Npgsql lê, para não aparecer em texto no arquivo.
       ConnectionStrings__Makerspace: Host=banco;Database=${POSTGRES_DB:-makerspace};Username=${POSTGRES_USER:-makerspace}
       PGPASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no .env}
+      # Chave do JWT: só no .env, nunca no repositório. Gere com: openssl rand -base64 48
+      Jwt__Chave: ${JWT_CHAVE:?Defina JWT_CHAVE no .env}
+      # A primeira Coordenação nasce destas variáveis, na subida, se ainda não existir nenhuma.
+      CoordenacaoInicial__Email: ${COORDENACAO_EMAIL:-}
+      CoordenacaoInicial__Senha: ${COORDENACAO_SENHA:-}
 
 volumes:
   dados-banco:
