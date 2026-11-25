@@ -47,6 +47,7 @@ public class SaudeTests(FabricaDaApi fabrica)
         await using var fabricaSemBanco = new FabricaSemBanco(new Dictionary<string, string?>
         {
             ["ConnectionStrings:Makerspace"] = conexao,
+            ["Jwt:Chave"] = ConfiguracaoDeTeste.NovaChave(),
             ["Banco:AplicarMigracoesNaSubida"] = "false",
         });
         using var cliente = fabricaSemBanco.CreateClient();
