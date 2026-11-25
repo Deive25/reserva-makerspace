@@ -25,4 +25,5 @@ A API precisa de cadastro, login e três papéis cumulativos (Usuário, Equipe e
 - **Pior:** uma consulta ao banco por pedido autenticado. É uma leitura pela chave primária, aceitável neste tamanho.
 - **Pior:** sem limite de tentativas de login até o incremento 1.10 (o *rate limiter* por IP). O bloqueio de conta do Identity foi descartado, porque deixaria qualquer visitante travar as contas de demonstração.
 - **Pior:** sem refresh, a pessoa entra de novo a cada 60 min.
+- **Pior:** saber se um e-mail tem conta não é segredo. O cadastro repetido responde 409, e o login com e-mail inexistente volta mais rápido, porque não calcula o hash (a mensagem é a mesma). Igualar o tempo do login não adiantaria enquanto o cadastro disser o mesmo; o limite de tentativas do 1.10 reduz o abuso.
 - **Pior:** a trava de linhas deixa duas trocas de papel simultâneas em fila (raras, e só da Coordenação).
