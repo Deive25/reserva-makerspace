@@ -11,7 +11,8 @@ Roteiro em `docs/specs/2026-11-24-c1-reserva-makerspace-design.md` (§9).
 - **1.1 Esqueleto: concluído.** Solução, `Intervalo` (primeira regra do domínio), PostgreSQL com a primeira migração, `/saude`, erros em ProblemDetails, OpenAPI com Scalar, Docker, Compose e CI.
 - **1.2 Login e papéis: concluído.** Cadastro, login com JWT de 60 min, `/me`, papéis cumulativos (Usuário, Equipe e Coordenação), primeira Coordenação por variáveis de ambiente, e `GET /usuarios` e `PUT /usuarios/{id}/papel` para a Coordenação. Toda rota exige login, menos as públicas.
 - **1.3 Tipos e máquinas: concluído.** `GET`, `POST` e `PUT` de tipos de equipamento e de máquinas (a Coordenação cadastra e altera; qualquer pessoa logada consulta, inclusive as máquinas inativas), com nome único sem diferenciar maiúsculas e minúsculas. No Compose e no ambiente de desenvolvimento, a API sobe com dados de exemplo do Itec Park (ADR 0004). O CI passou para as versões das actions que rodam no Node 24, e o Dockerfile usa o mesmo SDK do `global.json`.
-- 1.4 a 1.10: treinamentos, reservas, desmarcação, manutenção, Blazor e deploy.
+- **1.4 Treinamentos: concluído.** A Equipe e a Coordenação registram e revogam treinamentos (pessoa por tipo de equipamento, válidos por 12 meses); renovar é registrar outro, e o histórico fica. Cada pessoa vê os seus em `GET /me/treinamentos`. A situação (válido, vencido ou revogado) é calculada pelo relógio da API, que vale também na validação do JWT (ADR 0005). Os dados de exemplo ganharam treinamentos.
+- 1.5 a 1.10: reservas, desmarcação, manutenção, Blazor e deploy.
 
 ## Como rodar
 
@@ -41,7 +42,15 @@ Sem a senha do banco ou sem a chave no `.env`, o Compose para com "Defina POSTGR
 | Beto Bolsista | `bolsista@makerspace.example` | Equipe |
 | Carla Coordenadora | `coordenadora@makerspace.example` | Coordenação |
 
-Sem `EXEMPLO_SENHA`, entram só os tipos e as máquinas. Os dados de exemplo só são criados, nunca alterados: subir de novo não duplica nada, e uma máquina renomeada ou uma pessoa rebaixada continuam como estão. Fora do Compose, a opção `DadosDeExemplo:Aplicar` vem desligada (só o `appsettings.Development.json` a liga).
+Os treinamentos de exemplo (as datas são relativas ao momento da subida) mostram as três situações:
+
+| Pessoa | Treinamentos |
+|---|---|
+| Ana Aluna | Impressora 3D FDM (válido, há 2 meses), Cortadora a laser (vencido, há 13 meses, renovação pendente) e Impressora 3D de resina (revogado há 7 dias, "Descarte de resina fora do recipiente.") |
+| Beto Bolsista | os 4 tipos (válidos, há 6 meses) e um registro antigo de Impressora 3D FDM (vencido, há 18 meses, o histórico antes da renovação) |
+| Carla Coordenadora | Cortadora a laser (válido, há 1 mês) |
+
+Sem `EXEMPLO_SENHA`, entram só os tipos e as máquinas. Eles entram só se ainda não houver nenhum treinamento, e as datas envelhecem num banco que dura meses. Os dados de exemplo só são criados, nunca alterados: subir de novo não duplica nada, e uma máquina renomeada ou uma pessoa rebaixada continuam como estão. Fora do Compose, a opção `DadosDeExemplo:Aplicar` vem desligada (só o `appsettings.Development.json` a liga).
 
 **Entrar no Scalar:** faça `POST /auth/login` com o e-mail e a senha da Coordenação, copie o `token` da resposta e cole no campo *Bearer* de autenticação do Scalar. Dali em diante, as chamadas já vão com o token. Ele vale 60 minutos.
 
@@ -58,6 +67,16 @@ Rotas de tipos e máquinas (o `GET` vale para qualquer pessoa logada; o `POST` e
 
 Não há `DELETE`: desativar uma máquina (`ativo: false`) não apaga o histórico. O `PUT` substitui o recurso inteiro, então todos os campos são obrigatórios. Nome repetido responde 409, e um `tipoId` que não existe, 400.
 
+Rotas de treinamentos:
+
+| Rota | Quem | O que faz |
+|---|---|---|
+| `POST /treinamentos` | Equipe | Registra `{ usuarioId, tipoId }`; vale 12 meses a partir do registro. Ninguém registra o próprio (422); pessoa ou tipo inexistente, 400 |
+| `GET /treinamentos`, `GET /treinamentos/{id}` | Equipe | Lista (filtro opcional `?usuarioId=`) e consulta um treinamento |
+| `POST /treinamentos/{id}/revogacao` | Equipe | Revoga com `{ motivo }` (até 500 caracteres); revoga também os outros ainda válidos da pessoa no tipo. Já revogado ou vencido, 409 |
+| `GET /me/treinamentos` | Qualquer pessoa logada | Só os treinamentos da própria pessoa, com a situação, quem registrou e, se houver, quem revogou e por quê |
+
+"Equipe" vale também para a Coordenação. Não há `PUT` nem `DELETE`: o histórico não se apaga, e revogar é a única mudança.
 ## Como testar
 
 ```bash
@@ -81,7 +100,7 @@ flowchart LR
     EF --> PG[("PostgreSQL 17")]
 ```
 
-- `Dominio` guarda as regras (hoje, o `Intervalo` semiaberto, o `Papel`, o tipo de equipamento e a máquina) sem depender de banco nem de web, e por isso tem testes de unidade rápidos, sem Docker.
+- `Dominio` guarda as regras (hoje, o `Intervalo` semiaberto, o `Papel`, o tipo de equipamento, a máquina e o treinamento com a validade e a revogação) sem depender de banco nem de web, e por isso tem testes de unidade rápidos, sem Docker.
 - `Contratos` guarda os DTOs de pedido e resposta, compartilhados com o Blazor. Referencia só o `Dominio`.
 - `Api` expõe as rotas, autentica (Identity e JWT), aplica as migrations na subida e responde os erros em ProblemDetails, com títulos em português.
 - `Testes.Integracao` sobe a API inteira (`WebApplicationFactory`) contra um PostgreSQL real em container.
@@ -92,6 +111,7 @@ flowchart LR
 - [0002. Migrations na subida da API](docs/decisoes/0002-migrations-na-subida-da-api.md)
 - [0003. Login com Identity e JWT](docs/decisoes/0003-login-com-identity-e-jwt.md)
 - [0004. Dados de exemplo na subida](docs/decisoes/0004-dados-de-exemplo-na-subida.md)
+- [0005. Um relógio só](docs/decisoes/0005-um-relogio-so.md)
 
 ## Roteiro de entrevista
 
@@ -109,10 +129,13 @@ flowchart LR
 - **De onde vem o 409 do nome repetido?** Do próprio índice único: a API grava e traduz a violação (`PostgresException` 23505, pelo nome do índice) em 409. Consultar antes de gravar deixaria uma janela entre conferir e gravar, e dois pedidos simultâneos com o mesmo nome dariam 500. Um teste dispara os dois juntos e confere um 201 e um 409.
 - **Por que os dados de exemplo só criam e não vêm numa migração?** Uma migração levaria os dados para a produção, e não gera o hash da senha. A classe de exemplo roda na subida, só quando a configuração manda, usa o `UserManager` e nunca altera nem apaga: uma máquina renomeada ou uma pessoa rebaixada não voltam ao que eram (ver o ADR 0004).
 - **Por que o `PUT` exige todos os campos?** Se `ativo` fosse opcional, um `PUT` feito só para renomear reativaria sem querer uma máquina inativa. Com o recurso inteiro no pedido, cada campo é uma decisão explícita.
+- **Por que revogar um treinamento revoga os outros da mesma pessoa no tipo?** Quem renovou antes de vencer tem dois registros válidos. Revogando só um, a pessoa continuaria treinada pelo outro. A revogação roda numa transação que trava as linhas da pessoa no tipo (`SELECT … FOR UPDATE`, em ordem de id), e dois pedidos simultâneos dão um 200 e um 409. O registro já vencido continua vencido.
+- **Por que a data de validade fica gravada na linha, e o intervalo é semiaberto?** O treinamento vale em `[realizadoEm, validoAte)`, como os intervalos das reservas: nos 12 meses exatos já está vencido. Gravar `validoAte` deixa o 1.5 comparar com o fim da reserva direto no SQL, e uma mudança futura na regra não altera os treinamentos já feitos. A situação, ao contrário, nunca é gravada: sai do relógio na consulta. Um treinamento de 29/02 vale até 28/02 do ano seguinte.
+- **Como se testa "vence em 12 meses" sem esperar um ano?** Todo "agora" da API vem do `TimeProvider`, e os testes o trocam por um `FakeTimeProvider` e o avançam. Isso inclui a validação do JWT, por um `LifetimeValidator`, porque a propriedade `TimeProvider` da biblioteca é interna (ver o ADR 0005). O preço é uma fábrica de testes com banco próprio, mais lenta.
 
 ## Próximos passos
 
-- 1.4: treinamentos (quem pode usar cada tipo de equipamento).
+- 1.5: reservas (as regras de conflito, de duração e do treinamento válido no fim da reserva; revogar um treinamento cancela as reservas futuras).
 - 1.10: limite de tentativas de login (*rate limiter* por IP), junto do deploy.
 
 ## Como foi feito
