@@ -1,4 +1,6 @@
 using Npgsql;
+using ReservaMakerspace.Contratos.Treinamentos;
+using ReservaMakerspace.Dominio;
 
 namespace ReservaMakerspace.Testes.Integracao;
 
@@ -8,6 +10,7 @@ public class DadosDeExemploTests(BancosDeTeste bancos) : IClassFixture<BancosDeT
     private const string TotalDeMaquinas = "SELECT count(*) FROM equipamentos";
     private const string TotalDeInativas = "SELECT count(*) FROM equipamentos WHERE NOT ativo";
     private const string TotalDeUsuarios = "SELECT count(*) FROM usuarios";
+    private const string TotalDeTreinamentos = "SELECT count(*) FROM treinamentos";
 
     private const string EmailDaAna = "aluna@makerspace.example";
     private const string EmailDoBeto = "bolsista@makerspace.example";
@@ -176,6 +179,96 @@ public class DadosDeExemploTests(BancosDeTeste bancos) : IClassFixture<BancosDeT
         Assert.Equal(0, await ContarAsync(connectionString, TotalDeTipos));
         Assert.Equal(0, await ContarAsync(connectionString, TotalDeMaquinas));
         Assert.Equal(0, await ContarAsync(connectionString, TotalDeUsuarios));
+    }
+
+    private static async Task<List<TreinamentoResposta>> MeusTreinamentosAsync(
+        FabricaSemBanco fabrica, string email, string senha)
+    {
+        var contas = new AuxiliarDeContas(fabrica, "", "");
+        using var cliente = contas.ClienteCom(await contas.EntrarAsync(email, senha));
+        var resposta = await cliente.GetAsync("/me/treinamentos", TestContext.Current.CancellationToken);
+        Assert.Equal(System.Net.HttpStatusCode.OK, resposta.StatusCode);
+        return await Json.LerAsync<List<TreinamentoResposta>>(resposta);
+    }
+
+    [Fact]
+    public async Task Os_treinamentos_de_exemplo_tem_as_tres_situacoes_e_a_Ana_ve_os_tres_dela_no_login()
+    {
+        var connectionString = await bancos.NovoBancoAsync();
+        var senha = AuxiliarDeContas.NovaSenha();
+        await using var fabrica = Fabrica(connectionString, senha: senha);
+        using var cliente = fabrica.CreateClient();
+
+        Assert.Equal(9, await ContarAsync(connectionString, TotalDeTreinamentos));
+
+        var daAna = await MeusTreinamentosAsync(fabrica, EmailDaAna, senha);
+        Assert.Equal(3, daAna.Count);
+        var valido = Assert.Single(daAna, t => t.TipoNome == "Impressora 3D FDM");
+        var vencido = Assert.Single(daAna, t => t.TipoNome == "Cortadora a laser");
+        var revogado = Assert.Single(daAna, t => t.TipoNome == "Impressora 3D de resina");
+        Assert.Equal(SituacaoDoTreinamento.Valido, valido.Situacao);
+        Assert.Equal(SituacaoDoTreinamento.Vencido, vencido.Situacao);
+        Assert.Equal(SituacaoDoTreinamento.Revogado, revogado.Situacao);
+        Assert.Equal("Descarte de resina fora do recipiente.", revogado.MotivoDaRevogacao);
+        Assert.Equal("Beto Bolsista", revogado.RevogadoPorNome);
+        Assert.Equal("Beto Bolsista", valido.RegistradoPorNome);
+
+        var doBeto = await MeusTreinamentosAsync(fabrica, EmailDoBeto, senha);
+        Assert.Equal(5, doBeto.Count);
+        Assert.Equal(4, doBeto.Count(t => t.Situacao == SituacaoDoTreinamento.Valido));
+        var antigo = Assert.Single(doBeto, t => t.Situacao == SituacaoDoTreinamento.Vencido);
+        Assert.Equal("Impressora 3D FDM", antigo.TipoNome);
+        Assert.Equal("Carla Coordenadora", antigo.RegistradoPorNome);
+
+        var daCarla = await MeusTreinamentosAsync(fabrica, EmailDaCarla, senha);
+        var dela = Assert.Single(daCarla);
+        Assert.Equal(SituacaoDoTreinamento.Valido, dela.Situacao);
+        Assert.Equal("Cortadora a laser", dela.TipoNome);
+    }
+
+    [Fact]
+    public async Task Subir_de_novo_nao_duplica_os_treinamentos()
+    {
+        var connectionString = await bancos.NovoBancoAsync();
+        var senha = AuxiliarDeContas.NovaSenha();
+        await using (var primeira = Fabrica(connectionString, senha: senha))
+        {
+            using var cliente = primeira.CreateClient();
+        }
+
+        await using var segunda = Fabrica(connectionString, senha: senha);
+        using var outroCliente = segunda.CreateClient();
+
+        Assert.Equal(9, await ContarAsync(connectionString, TotalDeTreinamentos));
+    }
+
+    [Fact]
+    public async Task Sem_a_senha_nenhum_treinamento_entra_porque_nao_ha_pessoas()
+    {
+        var connectionString = await bancos.NovoBancoAsync();
+        await using var fabrica = Fabrica(connectionString, senha: null);
+
+        using var cliente = fabrica.CreateClient();
+
+        Assert.Equal(0, await ContarAsync(connectionString, TotalDeTreinamentos));
+    }
+
+    [Fact]
+    public async Task Tipo_renomeado_fica_de_fora_sem_erro_e_so_os_que_existem_entram()
+    {
+        var connectionString = await bancos.NovoBancoAsync();
+        var senha = AuxiliarDeContas.NovaSenha();
+        await using (var primeira = Fabrica(connectionString, aplicar: true, senha: null))
+        {
+            using var cliente = primeira.CreateClient();
+        }
+
+        await ExecutarAsync(connectionString, "UPDATE tipos_de_equipamento SET nome = 'Laser renomeado' WHERE nome = 'Cortadora a laser'");
+        await using var segunda = Fabrica(connectionString, senha: senha);
+        using var outroCliente = segunda.CreateClient();
+
+        // Os 3 treinamentos da cortadora (Ana, Beto e Carla) saem; ficam 6.
+        Assert.Equal(6, await ContarAsync(connectionString, TotalDeTreinamentos));
     }
 
     private static string PessoaComPapel(string email, string papel) =>
