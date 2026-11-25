@@ -12,7 +12,8 @@ Roteiro em `docs/specs/2026-11-24-c1-reserva-makerspace-design.md` (§9).
 - **1.2 Login e papéis: concluído.** Cadastro, login com JWT de 60 min, `/me`, papéis cumulativos (Usuário, Equipe e Coordenação), primeira Coordenação por variáveis de ambiente, e `GET /usuarios` e `PUT /usuarios/{id}/papel` para a Coordenação. Toda rota exige login, menos as públicas.
 - **1.3 Tipos e máquinas: concluído.** `GET`, `POST` e `PUT` de tipos de equipamento e de máquinas (a Coordenação cadastra e altera; qualquer pessoa logada consulta, inclusive as máquinas inativas), com nome único sem diferenciar maiúsculas e minúsculas. No Compose e no ambiente de desenvolvimento, a API sobe com dados de exemplo do Itec Park (ADR 0004). O CI passou para as versões das actions que rodam no Node 24, e o Dockerfile usa o mesmo SDK do `global.json`.
 - **1.4 Treinamentos: concluído.** A Equipe e a Coordenação registram e revogam treinamentos (pessoa por tipo de equipamento, válidos por 12 meses); renovar é registrar outro, e o histórico fica. Cada pessoa vê os seus em `GET /me/treinamentos`. A situação (válido, vencido ou revogado) é calculada pelo relógio da API, que vale também na validação do JWT (ADR 0005). Os dados de exemplo ganharam treinamentos.
-- 1.5 a 1.10: reservas, desmarcação, manutenção, Blazor e deploy.
+- **1.5 Reservas, o núcleo: concluído.** Qualquer pessoa logada reserva uma máquina (`POST /reservas`) com as regras da §4.2 da spec: treinamento válido até o fim da reserva, sem sobreposição (mesmo com pedidos simultâneos), duração máxima do tipo, até 7 dias de antecedência e no máximo 2 reservas pessoais ativas. A Equipe e a Coordenação também fazem demandas do parque (até 30 dias, sem duração máxima). Cada pessoa vê e cancela as suas, e a Equipe lista as de todos. Revogar um treinamento cancela as reservas futuras da pessoa no tipo, e uma máquina com reservas futuras não é desativada. A concorrência está no ADR 0006.
+- 1.6 a 1.10: disponibilidade e desmarcação, manutenção, Blazor e deploy.
 
 ## Como rodar
 
@@ -50,7 +51,21 @@ Os treinamentos de exemplo (as datas são relativas ao momento da subida) mostra
 | Beto Bolsista | os 4 tipos (válidos, há 6 meses) e um registro antigo de Impressora 3D FDM (vencido, há 18 meses, o histórico antes da renovação) |
 | Carla Coordenadora | Cortadora a laser (válido, há 1 mês) |
 
-Sem `EXEMPLO_SENHA`, entram só os tipos e as máquinas. Os treinamentos de exemplo só entram se o banco ainda não tiver nenhum treinamento. Como as datas são contadas a partir da subida que os criou, num banco que dura meses elas envelhecem: o "válido, há 2 meses" um dia vence. Os dados de exemplo só são criados, nunca alterados: subir de novo não duplica nada, e uma máquina renomeada ou uma pessoa rebaixada continuam como estão. Fora do Compose, a opção `DadosDeExemplo:Aplicar` vem desligada (só o `appsettings.Development.json` a liga).
+As reservas de exemplo (horas cheias de Brasília, contadas a partir do dia da subida) mostram as situações e as duas finalidades:
+
+| Pessoa | Máquina | Quando | Finalidade e situação |
+|---|---|---|---|
+| Ana Aluna | Impressora FDM 1 | amanhã, 9h às 13h | Pessoal, "Suporte de celular", ativa |
+| Ana Aluna | Impressora FDM 3 | ontem, 14h às 18h | Pessoal, ativa (já passou: o histórico) |
+| Ana Aluna | Impressora de resina | há 5 dias, 10h às 12h | Pessoal, cancelada pela Equipe ("Treinamento revogado", pelo Beto, há 7 dias) |
+| Ana Aluna | Impressora FDM 2 | depois de amanhã, 10h às 14h | Pessoal, cancelada pela própria Ana |
+| Beto Bolsista | Cortadora a laser | amanhã, 14h às 18h | Demanda do parque, solicitante "Prof. Daniel (TCC de Engenharia)", ativa |
+| Beto Bolsista | Impressora de resina | daqui a 3 dias, 8h às 16h | Demanda do parque, ativa |
+| Carla Coordenadora | Cortadora a laser | daqui a 2 dias, 10h às 11h | Pessoal, ativa |
+
+A Ana fica com uma reserva pessoal futura, e assim dá para demonstrar mais uma antes do limite de 2.
+
+Sem `EXEMPLO_SENHA`, entram só os tipos e as máquinas. Os treinamentos e as reservas de exemplo só entram se o banco ainda não tiver nenhum treinamento (ou nenhuma reserva), e só para as pessoas e as máquinas que existirem. Como as datas são contadas a partir da subida que os criou, num banco que dura meses elas envelhecem: o "válido, há 2 meses" um dia vence, e as reservas de "amanhã" um dia ficam no passado. Os dados de exemplo só são criados, nunca alterados: subir de novo não duplica nada, e uma máquina renomeada ou uma pessoa rebaixada continuam como estão. Fora do Compose, a opção `DadosDeExemplo:Aplicar` vem desligada (só o `appsettings.Development.json` a liga).
 
 **Entrar no Scalar:** faça `POST /auth/login` com o e-mail e a senha da Coordenação, copie o `token` da resposta e cole no campo *Bearer* de autenticação do Scalar. Dali em diante, as chamadas já vão com o token. Ele vale 60 minutos.
 
@@ -76,7 +91,19 @@ Rotas de treinamentos:
 | `POST /treinamentos/{id}/revogacao` | Equipe | Revoga com `{ motivo }` (até 500 caracteres); revoga também os outros ainda válidos da pessoa no tipo. Já revogado ou vencido, 409 |
 | `GET /me/treinamentos` | Qualquer pessoa logada | Só os treinamentos da própria pessoa, com a situação, quem registrou e, se houver, quem revogou e por quê |
 
-"Equipe" vale também para a Coordenação. Não há `PUT` nem `DELETE`: o histórico não se apaga, e revogar é a única mudança.
+"Equipe" vale também para a Coordenação. Não há `PUT` nem `DELETE`: o histórico não se apaga, e revogar é a única mudança. Revogar também cancela, na mesma transação, as reservas ativas da pessoa nas máquinas do tipo que ainda não começaram (`CanceladaPelaEquipe`, motivo "Treinamento revogado"); a reserva em andamento continua, e parar a máquina na hora será uma manutenção (1.7).
+
+Rotas de reservas:
+
+| Rota | Quem | O que faz |
+|---|---|---|
+| `POST /reservas` | Qualquer pessoa logada | Reserva `{ equipamentoId, inicio, fim, finalidade, solicitante?, descricao? }` e responde 201 com `Location`. O operador é sempre quem pede. `finalidade` é `ProjetoPessoal` ou `DemandaDoParque` (esta só para a Equipe e a Coordenação; o `solicitante` só nela) |
+| `GET /reservas/{id}` | O dono ou a Equipe | Consulta uma reserva; a de outra pessoa responde 403 |
+| `GET /me/reservas` | Qualquer pessoa logada | As próprias reservas, inclusive as canceladas e o motivo, do início mais recente para o mais antigo |
+| `POST /reservas/{id}/cancelamento` | Só o dono | Cancela, sem corpo, antes do início (`CanceladaPeloDono`). Já cancelada ou já começada, 409; a Equipe também recebe 403 (desmarcar a reserva de outra pessoa é do 1.6) |
+| `GET /reservas` | Equipe | Lista as de todos, com os filtros opcionais `?usuarioId=` e `?equipamentoId=` |
+
+Os horários precisam trazer o fuso (`2026-12-01T10:00:00-03:00` ou `...Z`): sem ele a resposta é 400, porque o .NET leria o horário no fuso do servidor, que muda de máquina para máquina. A API grava e devolve em UTC. A ordem dos códigos de erro de `POST /reservas`: formato (400), papel (403), regras (422) e, por último, a agenda (409, com a lista `conflitos`: início, fim e finalidade de cada reserva que cruza). Os limites são inclusivos: começar agora, durar exatamente a máxima do tipo, começar em exatamente 7 dias e acabar exatamente no último instante do treinamento são aceitos. Desativar ou trocar o tipo de uma máquina com reservas ativas que ainda não acabaram (`PUT /equipamentos/{id}`) responde 409 com a mesma lista `conflitos`; renomear e reativar continuam livres.
 
 ## Como testar
 
@@ -101,7 +128,7 @@ flowchart LR
     EF --> PG[("PostgreSQL 17")]
 ```
 
-- `Dominio` guarda as regras (hoje, o `Intervalo` semiaberto, o `Papel`, o tipo de equipamento, a máquina e o treinamento com a validade e a revogação) sem depender de banco nem de web, e por isso tem testes de unidade rápidos, sem Docker.
+- `Dominio` guarda as regras (hoje, o `Intervalo` semiaberto, o `Papel`, o tipo de equipamento, a máquina, o treinamento com a validade e a revogação e a reserva com as regras da criação e o cancelamento) sem depender de banco nem de web, e por isso tem testes de unidade rápidos, sem Docker.
 - `Contratos` guarda os DTOs de pedido e resposta, compartilhados com o Blazor. Referencia só o `Dominio`.
 - `Api` expõe as rotas, autentica (Identity e JWT), aplica as migrations na subida e responde os erros em ProblemDetails, com títulos em português.
 - `Testes.Integracao` sobe a API inteira (`WebApplicationFactory`) contra um PostgreSQL real em container.
@@ -113,6 +140,7 @@ flowchart LR
 - [0003. Login com Identity e JWT](docs/decisoes/0003-login-com-identity-e-jwt.md)
 - [0004. Dados de exemplo na subida](docs/decisoes/0004-dados-de-exemplo-na-subida.md)
 - [0005. Um relógio só](docs/decisoes/0005-um-relogio-so.md)
+- [0006. Concorrência nas reservas](docs/decisoes/0006-concorrencia-nas-reservas.md)
 
 ## Roteiro de entrevista
 
@@ -133,10 +161,14 @@ flowchart LR
 - **Por que revogar um treinamento revoga os outros da mesma pessoa no tipo?** Quem renovou antes de vencer tem dois registros válidos. Revogando só um, a pessoa continuaria treinada pelo outro. A revogação roda numa transação que trava as linhas da pessoa no tipo (`SELECT … FOR UPDATE`, em ordem de id), e dois pedidos simultâneos dão um 200 e um 409. O registro já vencido continua vencido.
 - **Por que a data de validade fica gravada na linha, e o intervalo é semiaberto?** O treinamento vale em `[realizadoEm, validoAte)`, como os intervalos das reservas: nos 12 meses exatos já está vencido. Gravar `validoAte` deixa o 1.5 comparar com o fim da reserva direto no SQL, e uma mudança futura na regra não altera os treinamentos já feitos. A situação, ao contrário, nunca é gravada: sai do relógio na consulta. Um treinamento de 29/02 vale até 28/02 do ano seguinte.
 - **Como se testa "vence em 12 meses" sem esperar um ano?** Todo "agora" da API vem do `TimeProvider`, e os testes o trocam por um `FakeTimeProvider` e o avançam. Isso inclui a validação do JWT, por um `LifetimeValidator`, porque a propriedade `TimeProvider` da biblioteca é interna (ver o ADR 0005). O preço é uma fábrica de testes com banco próprio, mais lenta.
+- **Como duas pessoas não reservam a mesma máquina no mesmo horário?** Em duas camadas. A criação da reserva roda numa transação que trava a linha da máquina (`SELECT … FOR NO KEY UPDATE`) antes de procurar conflitos: o segundo pedido espera, vê a reserva do primeiro e recebe 409 com a lista. E uma restrição de exclusão do PostgreSQL (`EXCLUDE USING gist` sobre `tstzrange(inicio, fim, '[)')`, só para as reservas ativas) é a garantia final para qualquer caminho que escape da trava. A trava sozinha depende de todo caminho lembrar de travar, e a restrição sozinha daria ao perdedor um 409 sem a lista. Um teste dispara os pedidos juntos, em várias rodadas, e outro viola a restrição por SQL direto (ver o ADR 0006).
+- **E se alguém reserva no mesmo instante em que o treinamento dela é revogado?** A reserva trava as linhas de treinamento da pessoa no tipo em modo compartilhado (`FOR SHARE`) e a revogação as trava em modo exclusivo (`FOR UPDATE`), então uma espera a outra. Se a reserva chega primeiro, a revogação a cancela na mesma transação; se a revogação chega primeiro, a reserva encontra o treinamento revogado e responde 422. Nunca sobra reserva ativa e futura de quem perdeu o treinamento, e um teste confere isso a cada rodada.
+- **Por que `FOR NO KEY UPDATE` e uma ordem fixa das travas?** `FOR NO KEY UPDATE` põe em fila quem trava a mesma linha, mas não segura quem só grava uma linha com chave estrangeira apontando para ela (a checagem da chave estrangeira usa `FOR KEY SHARE`). Com `FOR UPDATE`, a Equipe que revoga o próprio treinamento enquanto reserva ficaria presa contra si mesma. E toda transação pega as travas na mesma ordem (máquina, treinamentos, pessoa), o que evita deadlock. O limite de 2 reservas pessoais precisa da trava na pessoa: sem ela, três pedidos simultâneos em máquinas diferentes passariam todos.
+- **O que acontece com a reserva em andamento de quem teve o treinamento revogado?** Continua. A impressão já está rodando, e cancelá-la deixaria a máquina livre na agenda com a peça ainda sendo impressa. A revogação cancela só o que não começou. Para parar a máquina na hora, a Equipe registra uma manutenção (1.7), o mesmo caminho que a spec dá para tirar uma máquina de uso.
 
 ## Próximos passos
 
-- 1.5: reservas (as regras de conflito, de duração e do treinamento válido no fim da reserva; revogar um treinamento cancela as reservas futuras).
+- 1.6: `GET /disponibilidade` (máquinas do tipo livres no intervalo), a agenda da máquina e a desmarcação de reservas pessoais para uma demanda do parque, com as travas da spec.
 - 1.10: limite de tentativas de login (*rate limiter* por IP), junto do deploy.
 
 ## Como foi feito
