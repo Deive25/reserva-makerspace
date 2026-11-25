@@ -23,6 +23,8 @@ public class MakerspaceDbContext(DbContextOptions<MakerspaceDbContext> opcoes)
 
     public DbSet<Equipamento> Equipamentos => Set<Equipamento>();
 
+    public DbSet<Treinamento> Treinamentos => Set<Treinamento>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -48,6 +50,21 @@ public class MakerspaceDbContext(DbContextOptions<MakerspaceDbContext> opcoes)
             maquina.Property(e => e.Nome).HasMaxLength(100).UseCollation(ColacaoDoNome);
             maquina.HasIndex(e => e.Nome).IsUnique().HasDatabaseName(IndiceDoNomeDaMaquina);
             maquina.HasOne(e => e.Tipo).WithMany().HasForeignKey(e => e.TipoId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // O Treinamento mora no Dominio, que não conhece o Usuario (do Identity, na Api): por isso as chaves
+        // estrangeiras para usuarios são declaradas aqui. Nenhuma tem exclusão em cascata: o histórico fica.
+        modelBuilder.Entity<Treinamento>(treinamento =>
+        {
+            treinamento.ToTable("treinamentos");
+            treinamento.HasKey(t => t.Id);
+            treinamento.Property(t => t.MotivoDaRevogacao).HasMaxLength(500);
+            // Atende "treinamentos da pessoa no tipo": a revogação, o /me e, no 1.5, a regra de quem pode reservar.
+            treinamento.HasIndex(t => new { t.UsuarioId, t.TipoId });
+            treinamento.HasOne<Usuario>().WithMany().HasForeignKey(t => t.UsuarioId).OnDelete(DeleteBehavior.Restrict);
+            treinamento.HasOne<TipoDeEquipamento>().WithMany().HasForeignKey(t => t.TipoId).OnDelete(DeleteBehavior.Restrict);
+            treinamento.HasOne<Usuario>().WithMany().HasForeignKey(t => t.RegistradoPorId).OnDelete(DeleteBehavior.Restrict);
+            treinamento.HasOne<Usuario>().WithMany().HasForeignKey(t => t.RevogadoPorId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Usuario>(usuario =>

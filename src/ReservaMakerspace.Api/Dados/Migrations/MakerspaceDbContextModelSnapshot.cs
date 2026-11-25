@@ -261,6 +261,64 @@ namespace ReservaMakerspace.Api.Dados.Migrations
                     b.ToTable("tipos_de_equipamento", (string)null);
                 });
 
+            modelBuilder.Entity("ReservaMakerspace.Dominio.Treinamento", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("MotivoDaRevogacao")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("motivo_da_revogacao");
+
+                    b.Property<DateTimeOffset>("RealizadoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("realizado_em");
+
+                    b.Property<Guid>("RegistradoPorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("registrado_por_id");
+
+                    b.Property<DateTimeOffset?>("RevogadoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revogado_em");
+
+                    b.Property<Guid?>("RevogadoPorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("revogado_por_id");
+
+                    b.Property<Guid>("TipoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tipo_id");
+
+                    b.Property<Guid>("UsuarioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("usuario_id");
+
+                    b.Property<DateTimeOffset>("ValidoAte")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("valido_ate");
+
+                    b.HasKey("Id")
+                        .HasName("pk_treinamentos");
+
+                    b.HasIndex("RegistradoPorId")
+                        .HasDatabaseName("ix_treinamentos_registrado_por_id");
+
+                    b.HasIndex("RevogadoPorId")
+                        .HasDatabaseName("ix_treinamentos_revogado_por_id");
+
+                    b.HasIndex("TipoId")
+                        .HasDatabaseName("ix_treinamentos_tipo_id");
+
+                    b.HasIndex("UsuarioId", "TipoId")
+                        .HasDatabaseName("ix_treinamentos_usuario_id_tipo_id");
+
+                    b.ToTable("treinamentos", (string)null);
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserClaim<System.Guid>", b =>
                 {
                     b.HasOne("ReservaMakerspace.Api.Dados.Usuario", null)
@@ -301,6 +359,36 @@ namespace ReservaMakerspace.Api.Dados.Migrations
                         .HasConstraintName("fk_equipamentos_tipos_de_equipamento_tipo_id");
 
                     b.Navigation("Tipo");
+                });
+
+            modelBuilder.Entity("ReservaMakerspace.Dominio.Treinamento", b =>
+                {
+                    b.HasOne("ReservaMakerspace.Api.Dados.Usuario", null)
+                        .WithMany()
+                        .HasForeignKey("RegistradoPorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_treinamentos_asp_net_users_registrado_por_id");
+
+                    b.HasOne("ReservaMakerspace.Api.Dados.Usuario", null)
+                        .WithMany()
+                        .HasForeignKey("RevogadoPorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_treinamentos_asp_net_users_revogado_por_id");
+
+                    b.HasOne("ReservaMakerspace.Dominio.TipoDeEquipamento", null)
+                        .WithMany()
+                        .HasForeignKey("TipoId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_treinamentos_tipos_de_equipamento_tipo_id");
+
+                    b.HasOne("ReservaMakerspace.Api.Dados.Usuario", null)
+                        .WithMany()
+                        .HasForeignKey("UsuarioId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_treinamentos_asp_net_users_usuario_id");
                 });
 #pragma warning restore 612, 618
         }
