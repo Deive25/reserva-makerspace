@@ -57,6 +57,15 @@ public static class AutenticacaoExtensions
                 opcoes.Events = new JwtBearerEvents { OnTokenValidated = AplicarPapelAtualAsync };
             });
 
+        // Um relógio só: a validade do token (exp e nbf) lê o mesmo TimeProvider que emite o token e calcula os
+        // treinamentos. A propriedade TokenValidationParameters.TimeProvider é interna na biblioteca (8.19.2),
+        // por isso o relógio entra pelo LifetimeValidator, que é público (ADR 0005). O relógio vem do contêiner
+        // de serviços, onde os testes o trocam por um FakeTimeProvider.
+        servicos.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+            .Configure<TimeProvider>((opcoes, relogio) =>
+                opcoes.TokenValidationParameters.LifetimeValidator = (naoAntesDe, expiraEm, _, parametros) =>
+                    TempoDeVidaValido(naoAntesDe, expiraEm, parametros.ClockSkew, relogio.GetUtcNow().UtcDateTime));
+
         servicos.AddAuthorization(opcoes =>
         {
             // Seguro por padrão: toda rota exige login, e só as públicas são marcadas com AllowAnonymous.
@@ -66,6 +75,30 @@ public static class AutenticacaoExtensions
         });
 
         return servicos;
+    }
+
+    /// <summary>
+    /// Mesmas regras da validação padrão da biblioteca: sem <c>exp</c> recusa; <c>exp</c> passado além da folga
+    /// recusa; <c>nbf</c> futuro além da folga recusa; <c>nbf</c> depois de <c>exp</c> recusa.
+    /// </summary>
+    internal static bool TempoDeVidaValido(DateTime? naoAntesDe, DateTime? expiraEm, TimeSpan folga, DateTime agora)
+    {
+        if (expiraEm is null)
+        {
+            return false;
+        }
+
+        if (naoAntesDe is not null && naoAntesDe > expiraEm)
+        {
+            return false;
+        }
+
+        if (naoAntesDe is not null && naoAntesDe > agora + folga)
+        {
+            return false;
+        }
+
+        return expiraEm >= agora - folga;
     }
 
     /// <summary>

@@ -102,6 +102,7 @@ if (app.Configuration.GetValue("Banco:AplicarMigracoesNaSubida", true))
             banco,
             servicos.GetRequiredService<UserManager<Usuario>>(),
             app.Configuration,
+            servicos.GetRequiredService<TimeProvider>(),
             app.Logger);
     }
 }
