@@ -32,6 +32,9 @@ services:
       # A primeira Coordenação nasce destas variáveis, na subida, se ainda não existir nenhuma.
       CoordenacaoInicial__Email: ${COORDENACAO_EMAIL:-}
       CoordenacaoInicial__Senha: ${COORDENACAO_SENHA:-}
+      # Dados de exemplo (tipos, máquinas e uma pessoa em cada papel). A senha vale para as três pessoas.
+      DadosDeExemplo__Aplicar: "true"
+      DadosDeExemplo__Senha: ${EXEMPLO_SENHA:-}
 
 volumes:
   dados-banco:
