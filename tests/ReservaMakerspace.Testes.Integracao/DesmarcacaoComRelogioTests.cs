@@ -145,7 +145,7 @@ public class DesmarcacaoComRelogioTests(BancosDeTeste bancos) : IClassFixture<Ba
         using var daEquipe = fabrica.Contas.ClienteCom(equipe.Token);
         var pessoal = await ReservarOkAsync(doDono, maquina.Id, inicio, inicio.AddHours(1));
 
-        // Depois de ler os conflitos e antes do UPDATE da desmarcação, o dono cancela e confirma (o cancelamento do
+        // Depois de ler os conflitos e antes de a desmarcação travar as linhas e rodar o UPDATE, o dono cancela e confirma (o cancelamento do
         // dono não trava a máquina). O UPDATE condicional (situacao = 'Ativa') encontra 0 linhas e deixa o cancelamento
         // do dono como está, com a ordem das duas pontas fixa. Sem a condição, ele o sobrescreveria.
         var executou = false;

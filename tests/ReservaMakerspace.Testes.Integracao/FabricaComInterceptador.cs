@@ -12,7 +12,7 @@ namespace ReservaMakerspace.Testes.Integracao;
 /// <summary>
 /// Um interceptador de comandos do EF Core com dois ganchos para a desmarcação (plano do 1.6, decisões 6 e 7). Armado,
 /// faz falhar todo <c>INSERT</c> em <c>reservas</c>: o <c>UPDATE</c> que cancela as pessoais já rodou quando o <c>INSERT</c> da
-/// demanda falha, e a falha precisa desfazer os dois. E roda uma ação logo antes do <c>UPDATE</c> da desmarcação, para o
+/// demanda falha, e a falha precisa desfazer os dois. E roda uma ação logo antes de a desmarcação travar as linhas que vai cancelar, para o
 /// teste cancelar a reserva como o dono, de forma determinística, no meio do pedido.
 /// </summary>
 public sealed class InterceptadorDeReservas : DbCommandInterceptor
@@ -24,7 +24,7 @@ public sealed class InterceptadorDeReservas : DbCommandInterceptor
 
     public void DesarmarFalhaNoInsert() => _armado = false;
 
-    /// <summary>Roda a ação uma vez, logo antes do próximo <c>UPDATE</c> em <c>reservas</c> (o da desmarcação).</summary>
+    /// <summary>Roda a ação uma vez, logo antes de a desmarcação travar as linhas das reservas (o <c>SELECT ... FOR UPDATE</c> que vem antes do <c>UPDATE</c>).</summary>
     public void AntesDoProximoUpdate(Func<Task> acao) => _antesDoUpdate = acao;
 
     private void Conferir(DbCommand comando)
@@ -42,14 +42,21 @@ public sealed class InterceptadorDeReservas : DbCommandInterceptor
         return base.ReaderExecuting(comando, dados, resultado);
     }
 
-    public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
         DbCommand comando,
         CommandEventData dados,
         InterceptionResult<DbDataReader> resultado,
         CancellationToken cancellationToken = default)
     {
         Conferir(comando);
-        return base.ReaderExecutingAsync(comando, dados, resultado, cancellationToken);
+        // A trava das linhas da desmarcação (SELECT ... FOR UPDATE), logo antes de o pedido tomá-las.
+        if (comando.CommandText.Contains("FROM reservas WHERE id = ANY", StringComparison.Ordinal)
+            && Interlocked.Exchange(ref _antesDoUpdate, null) is { } acao)
+        {
+            await acao();
+        }
+
+        return await base.ReaderExecutingAsync(comando, dados, resultado, cancellationToken);
     }
 
     public override InterceptionResult<int> NonQueryExecuting(
@@ -66,12 +73,6 @@ public sealed class InterceptadorDeReservas : DbCommandInterceptor
         CancellationToken cancellationToken = default)
     {
         Conferir(comando);
-        if (comando.CommandText.StartsWith("UPDATE reservas", StringComparison.Ordinal)
-            && Interlocked.Exchange(ref _antesDoUpdate, null) is { } acao)
-        {
-            await acao();
-        }
-
         return await base.NonQueryExecutingAsync(comando, dados, resultado, cancellationToken);
     }
 }
