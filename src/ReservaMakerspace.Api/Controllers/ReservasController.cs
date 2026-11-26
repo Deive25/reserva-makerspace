@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using ReservaMakerspace.Api.Autenticacao;
 using ReservaMakerspace.Api.Dados;
 using ReservaMakerspace.Api.Erros;
+using ReservaMakerspace.Contratos.Equipamentos;
 using ReservaMakerspace.Contratos.Reservas;
 using ReservaMakerspace.Dominio;
 
@@ -109,6 +110,11 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
             ModelState.AddModelError("solicitante", "O solicitante só existe na demanda do parque.");
         }
 
+        if (finalidade == FinalidadeDaReserva.ProjetoPessoal && Reserva.Normalizar(pedido.MotivoDesmarcacao) is not null)
+        {
+            ModelState.AddModelError("motivoDesmarcacao", "O motivo da desmarcação só existe na demanda do parque.");
+        }
+
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);
@@ -178,8 +184,41 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
         var conflitos = await banco.ReservasAtivasQueCruzamAsync(equipamentoId, reserva.Inicio, reserva.Fim);
         if (conflitos.Count > 0)
         {
-            return ConflitoDaAgenda(conflitos.Select(c => c.Visivel(eu, EhDaEquipe())).ToList());
+            // Todo 409 de agenda traz as máquinas livres do tipo (decisão 4), com a mesma consulta da disponibilidade.
+            var livres = await banco.MaquinasLivresAsync(maquina.TipoId, reserva.Inicio, reserva.Fim);
+            var visiveis = conflitos.Select(c => c.Visivel(eu, EhDaEquipe())).ToList();
+
+            if (finalidade == FinalidadeDaReserva.ProjetoPessoal)
+            {
+                return ConflitoDaAgenda(visiveis, livres);
+            }
+
+            // Demanda do parque: as travas da desmarcação (§4.3), no domínio. Qualquer recusa é 409, porque o que
+            // impede a reserva continua sendo a agenda; a mensagem diz por que desmarcar não resolve.
+            var recusa = Desmarcacao.Avaliar(
+                conflitos.Select(c => new ReservaEmConflito(c.Inicio, c.Finalidade)).ToList(),
+                pedido.MotivoDesmarcacao,
+                livres.FirstOrDefault()?.Nome,
+                agora);
+            if (recusa is not null)
+            {
+                return ConflitoDaAgenda(visiveis, livres, recusa.Mensagem);
+            }
+
+            // Todas as travas passaram: cancela as pessoais na mesma transação da criação, sob a trava da máquina.
+            // O UPDATE só pega as ainda ativas: se o dono cancelou no meio, a vaga ficou livre de qualquer jeito e
+            // o motivo de quem cancelou primeiro fica (ADR 0006).
+            var ids = conflitos.Select(c => c.Id).ToList();
+            var motivo = Reserva.Normalizar(pedido.MotivoDesmarcacao);
+            await banco.Reservas
+                .Where(r => ids.Contains(r.Id) && r.Situacao == SituacaoDaReserva.Ativa)
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(r => r.Situacao, SituacaoDaReserva.CanceladaPelaEquipe)
+                    .SetProperty(r => r.CanceladaEm, agora)
+                    .SetProperty(r => r.CanceladaPorId, eu)
+                    .SetProperty(r => r.MotivoDoCancelamento, motivo));
         }
+
 
         banco.Reservas.Add(reserva);
         try
@@ -189,8 +228,9 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
         catch (DbUpdateException erro) when (
             ViolacaoDeExclusao.Eh(erro, MakerspaceDbContext.RestricaoDeSobreposicaoDasReservas))
         {
-            // A garantia final do banco: só chega aqui um caminho que escapou da trava. Sem a lista (ADR 0006).
-            return ConflitoDaAgenda(null);
+            // A garantia final do banco: só chega aqui um caminho que escapou da trava. A transação já falhou e não
+            // aceita outra consulta: sem as duas listas (ADR 0006), e a desmarcação, se houve, é desfeita junto.
+            return ConflitoDaAgenda(null, null);
         }
 
         await transacao.CommitAsync();
@@ -295,21 +335,33 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
         : User.IsInRole(nameof(Papel.Equipe)) ? Papel.Equipe
         : Papel.Usuario;
 
-    /// <summary>409 de agenda. <paramref name="conflitos"/> é <c>null</c> quando quem recusou foi a restrição do banco.</summary>
-    private ObjectResult ConflitoDaAgenda(List<ReservaNaAgenda>? conflitos)
+    /// <summary>
+    /// 409 de agenda. <paramref name="conflitos"/> e <paramref name="maquinasLivres"/> são <c>null</c> quando quem
+    /// recusou foi a restrição do banco. <paramref name="detalhe"/> traz a mensagem da trava que recusou a desmarcação.
+    /// </summary>
+    private ObjectResult ConflitoDaAgenda(
+        List<ReservaNaAgenda>? conflitos,
+        List<EquipamentoResposta>? maquinasLivres,
+        string detalhe = Desmarcacao.MensagemDoConflito)
     {
         var problema = ProblemDetailsFactory.CreateProblemDetails(
             HttpContext,
             StatusCodes.Status409Conflict,
             title: TitulosDeErro.Para(StatusCodes.Status409Conflict),
-            detail: "A máquina já tem uma reserva ativa nesse horário.");
+            detail: detalhe);
         if (conflitos is not null)
         {
             problema.Extensions["conflitos"] = conflitos;
         }
 
+        if (maquinasLivres is not null)
+        {
+            problema.Extensions["maquinasLivres"] = maquinasLivres;
+        }
+
         return new ObjectResult(problema) { StatusCode = StatusCodes.Status409Conflict };
     }
+
 
     private ObjectResult DeOutraPessoa() =>
         Problem(
