@@ -18,11 +18,17 @@ namespace ReservaMakerspace.Testes.Integracao;
 public sealed class InterceptadorDeReservas : DbCommandInterceptor
 {
     private volatile bool _armado;
+    private volatile bool _armadoNaManutencao;
     private Func<Task>? _antesDoUpdate;
 
     public void ArmarFalhaNoInsert() => _armado = true;
 
     public void DesarmarFalhaNoInsert() => _armado = false;
+
+    /// <summary>Armado, faz falhar todo <c>INSERT</c> em <c>manutencoes</c> (plano do 1.7: o registro cancela as reservas e grava a manutenção na mesma transação).</summary>
+    public void ArmarFalhaNoInsertDeManutencao() => _armadoNaManutencao = true;
+
+    public void DesarmarFalhaNoInsertDeManutencao() => _armadoNaManutencao = false;
 
     /// <summary>Roda a ação uma vez, logo antes de a desmarcação travar as linhas das reservas (o <c>SELECT ... FOR UPDATE</c> que vem antes do <c>UPDATE</c>).</summary>
     public void AntesDoProximoUpdate(Func<Task> acao) => _antesDoUpdate = acao;
@@ -32,6 +38,11 @@ public sealed class InterceptadorDeReservas : DbCommandInterceptor
         if (_armado && comando.CommandText.Contains("INSERT INTO reservas", StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Falha forçada no INSERT em reservas (teste da transação única).");
+        }
+
+        if (_armadoNaManutencao && comando.CommandText.Contains("INSERT INTO manutencoes", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Falha forçada no INSERT em manutencoes (teste da transação única).");
         }
     }
 
