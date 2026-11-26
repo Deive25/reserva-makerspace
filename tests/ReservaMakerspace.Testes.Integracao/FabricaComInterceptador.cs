@@ -10,17 +10,22 @@ using ReservaMakerspace.Api.Dados;
 namespace ReservaMakerspace.Testes.Integracao;
 
 /// <summary>
-/// Um interceptador de comandos do EF Core que, quando armado, faz falhar todo <c>INSERT</c> em <c>reservas</c>. Serve
-/// para provar a transação única da desmarcação (plano do 1.6, decisão 6): o <c>UPDATE</c> que cancela as pessoais já
-/// rodou quando o <c>INSERT</c> da demanda falha, e a falha precisa desfazer os dois.
+/// Um interceptador de comandos do EF Core com dois ganchos para a desmarcação (plano do 1.6, decisões 6 e 7). Armado,
+/// faz falhar todo <c>INSERT</c> em <c>reservas</c>: o <c>UPDATE</c> que cancela as pessoais já rodou quando o <c>INSERT</c> da
+/// demanda falha, e a falha precisa desfazer os dois. E roda uma ação logo antes do <c>UPDATE</c> da desmarcação, para o
+/// teste cancelar a reserva como o dono, de forma determinística, no meio do pedido.
 /// </summary>
-public sealed class FalhaNoInsertDeReservas : DbCommandInterceptor
+public sealed class InterceptadorDeReservas : DbCommandInterceptor
 {
     private volatile bool _armado;
+    private Func<Task>? _antesDoUpdate;
 
-    public void Armar() => _armado = true;
+    public void ArmarFalhaNoInsert() => _armado = true;
 
-    public void Desarmar() => _armado = false;
+    public void DesarmarFalhaNoInsert() => _armado = false;
+
+    /// <summary>Roda a ação uma vez, logo antes do próximo <c>UPDATE</c> em <c>reservas</c> (o da desmarcação).</summary>
+    public void AntesDoProximoUpdate(Func<Task> acao) => _antesDoUpdate = acao;
 
     private void Conferir(DbCommand comando)
     {
@@ -54,23 +59,29 @@ public sealed class FalhaNoInsertDeReservas : DbCommandInterceptor
         return base.NonQueryExecuting(comando, dados, resultado);
     }
 
-    public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+    public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
         DbCommand comando,
         CommandEventData dados,
         InterceptionResult<int> resultado,
         CancellationToken cancellationToken = default)
     {
         Conferir(comando);
-        return base.NonQueryExecutingAsync(comando, dados, resultado, cancellationToken);
+        if (comando.CommandText.StartsWith("UPDATE reservas", StringComparison.Ordinal)
+            && Interlocked.Exchange(ref _antesDoUpdate, null) is { } acao)
+        {
+            await acao();
+        }
+
+        return await base.NonQueryExecutingAsync(comando, dados, resultado, cancellationToken);
     }
 }
 
 /// <summary>
-/// Sobe a API num banco próprio com o <see cref="FalhaNoInsertDeReservas"/> registrado por
-/// <c>ConfigureDbContext</c>: o teste monta o cenário com a falha desarmada e a arma só no pedido que quer ver falhar.
+/// Sobe a API num banco próprio com o <see cref="InterceptadorDeReservas"/> registrado por
+/// <c>ConfigureDbContext</c>: o teste monta o cenário com os ganchos desligados e os liga só no pedido que quer observar.
 /// Fica fora da coleção compartilhada, como a <see cref="FabricaComRelogio"/>. Sem pacote novo.
 /// </summary>
-public sealed class FabricaComFalhaNoInsert(string connectionString) : WebApplicationFactory<Program>
+public sealed class FabricaComInterceptador(string connectionString) : WebApplicationFactory<Program>
 {
     private readonly string _chave = ConfiguracaoDeTeste.NovaChave();
     private readonly string _coordenacaoEmail = AuxiliarDeContas.NovoEmail();
@@ -79,7 +90,7 @@ public sealed class FabricaComFalhaNoInsert(string connectionString) : WebApplic
 
     public string ConnectionString { get; } = connectionString;
 
-    public FalhaNoInsertDeReservas Falha { get; } = new();
+    public InterceptadorDeReservas Interceptador { get; } = new();
 
     /// <summary>Cadastra, promove e faz login de pessoas de teste.</summary>
     public AuxiliarDeContas Contas => _contas ??= new AuxiliarDeContas(this, _coordenacaoEmail, _coordenacaoSenha);
@@ -96,6 +107,6 @@ public sealed class FabricaComFalhaNoInsert(string connectionString) : WebApplic
 
         // Acrescenta o interceptador à configuração do contexto que o Program já registrou.
         builder.ConfigureTestServices(servicos =>
-            servicos.ConfigureDbContext<MakerspaceDbContext>(opcoes => opcoes.AddInterceptors(Falha)));
+            servicos.ConfigureDbContext<MakerspaceDbContext>(opcoes => opcoes.AddInterceptors(Interceptador)));
     }
 }

@@ -96,7 +96,7 @@ public class DesmarcacaoComRelogioTests(BancosDeTeste bancos) : IClassFixture<Ba
     [Fact]
     public async Task Falha_no_INSERT_da_demanda_desfaz_a_desmarcacao_e_a_pessoal_continua_ativa()
     {
-        await using var fabrica = new FabricaComFalhaNoInsert(await bancos.NovoBancoAsync());
+        await using var fabrica = new FabricaComInterceptador(await bancos.NovoBancoAsync());
         var auxiliar = new AuxiliarDeReservas(fabrica.Contas);
         var tipo = await auxiliar.CriarTipoAsync();
         var maquina = await auxiliar.CriarMaquinaAsync(tipo.Id);
@@ -108,7 +108,7 @@ public class DesmarcacaoComRelogioTests(BancosDeTeste bancos) : IClassFixture<Ba
         var pessoal = await ReservarOkAsync(doDono, maquina.Id, inicio, inicio.AddHours(1));
 
         // Montado o cenário, a falha é armada: o UPDATE da desmarcação roda e o INSERT da demanda falha.
-        fabrica.Falha.Armar();
+        fabrica.Interceptador.ArmarFalhaNoInsert();
         var falhou = await ReservarAsync(
             daEquipe, maquina.Id, inicio, inicio.AddHours(1), "DemandaDoParque", "Prof. Teste", motivoDesmarcacao: Motivo);
 
@@ -123,11 +123,50 @@ public class DesmarcacaoComRelogioTests(BancosDeTeste bancos) : IClassFixture<Ba
                 fabrica.ConnectionString, "SELECT count(*) FROM reservas WHERE finalidade = 'DemandaDoParque'"));
 
         // Controle: sem a falha, o mesmo pedido desmarca e cria a demanda. A falha era a única coisa no caminho.
-        fabrica.Falha.Desarmar();
+        fabrica.Interceptador.DesarmarFalhaNoInsert();
         var aceita = await ReservarAsync(
             daEquipe, maquina.Id, inicio, inicio.AddHours(1), "DemandaDoParque", "Prof. Teste", motivoDesmarcacao: Motivo);
         Assert.Equal(HttpStatusCode.Created, aceita.StatusCode);
         var depois = Assert.Single(await ListarAsync(doDono, "/me/reservas"), r => r.Id == pessoal.Id);
         Assert.Equal(SituacaoDaReserva.CanceladaPelaEquipe, depois.Situacao);
+    }
+
+    [Fact]
+    public async Task Dono_que_cancela_no_meio_da_desmarcacao_nao_e_sobrescrito_e_a_demanda_sai()
+    {
+        await using var fabrica = new FabricaComInterceptador(await bancos.NovoBancoAsync());
+        var auxiliar = new AuxiliarDeReservas(fabrica.Contas);
+        var tipo = await auxiliar.CriarTipoAsync();
+        var maquina = await auxiliar.CriarMaquinaAsync(tipo.Id);
+        var dono = await auxiliar.PessoaTreinadaAsync(tipo.Id);
+        var equipe = await auxiliar.PessoaTreinadaAsync(tipo.Id, Papel.Equipe);
+        var inicio = Dia(2).AddHours(10);
+        using var doDono = fabrica.Contas.ClienteCom(dono.Token);
+        using var daEquipe = fabrica.Contas.ClienteCom(equipe.Token);
+        var pessoal = await ReservarOkAsync(doDono, maquina.Id, inicio, inicio.AddHours(1));
+
+        // Depois de ler os conflitos e antes do UPDATE da desmarcação, o dono cancela e confirma (o cancelamento do
+        // dono não trava a máquina). O UPDATE condicional (situacao = 'Ativa') encontra 0 linhas e deixa o cancelamento
+        // do dono como está, com a ordem das duas pontas fixa. Sem a condição, ele o sobrescreveria.
+        var executou = false;
+        fabrica.Interceptador.AntesDoProximoUpdate(async () =>
+        {
+            await using var fonte = Npgsql.NpgsqlDataSource.Create(fabrica.ConnectionString);
+            await using var comando = fonte.CreateCommand(
+                "UPDATE reservas SET situacao = 'CanceladaPeloDono', cancelada_em = now(), cancelada_por_id = $1 WHERE id = $2");
+            comando.Parameters.AddWithValue(dono.Id);
+            comando.Parameters.AddWithValue(pessoal.Id);
+            Assert.Equal(1, await comando.ExecuteNonQueryAsync(TestContext.Current.CancellationToken));
+            executou = true;
+        });
+
+        var resposta = await ReservarAsync(
+            daEquipe, maquina.Id, inicio, inicio.AddHours(1), "DemandaDoParque", "Prof. Teste", motivoDesmarcacao: Motivo);
+
+        Assert.True(executou);
+        Assert.Equal(HttpStatusCode.Created, resposta.StatusCode);
+        var vista = Assert.Single(await ListarAsync(doDono, "/me/reservas"), r => r.Id == pessoal.Id);
+        Assert.Equal(SituacaoDaReserva.CanceladaPeloDono, vista.Situacao);
+        Assert.Null(vista.MotivoDoCancelamento);
     }
 }
