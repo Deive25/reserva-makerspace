@@ -121,6 +121,10 @@ public class DesmarcacaoTests(FabricaDaApi fabrica)
 
         Assert.Equal("Uma demanda do parque não desmarca outra.", detalhe);
         Assert.Equal(2, corpo.RootElement.GetProperty("conflitos").GetArrayLength());
+        // Toda recusa traz a lista de máquinas livres; aqui o tipo tem uma máquina só, e a lista vem vazia.
+        var livres = corpo.RootElement.GetProperty("maquinasLivres");
+        Assert.Equal(JsonValueKind.Array, livres.ValueKind);
+        Assert.Equal(0, livres.GetArrayLength());
         await AssertAtivaAsync(c.Pessoal.Id, outraDemanda.Id);
     }
 
@@ -130,7 +134,7 @@ public class DesmarcacaoTests(FabricaDaApi fabrica)
     {
         var tipo = await _reservas.CriarTipoAsync();
         var maquina = await _reservas.CriarMaquinaAsync(tipo.Id);
-        await _reservas.CriarMaquinaAsync(tipo.Id);
+        var livre = await _reservas.CriarMaquinaAsync(tipo.Id);
         var dono = await _reservas.PessoaTreinadaAsync(tipo.Id);
         var equipe = await _reservas.PessoaTreinadaAsync(tipo.Id, Papel.Equipe);
         var inicio = Daqui(TimeSpan.FromHours(2));
@@ -142,6 +146,10 @@ public class DesmarcacaoTests(FabricaDaApi fabrica)
         var detalhe = Detalhe(corpo);
 
         Assert.Equal("Só dá para desmarcar reservas que começam daqui a mais de 24 h.", detalhe);
+        // A lista de máquinas livres vem também nesta recusa, com a outra máquina do tipo.
+        Assert.Equal(
+            livre.Id,
+            Assert.Single(corpo.RootElement.GetProperty("maquinasLivres").EnumerateArray()).GetProperty("id").GetGuid());
         await AssertAtivaAsync(pessoal.Id);
     }
 
