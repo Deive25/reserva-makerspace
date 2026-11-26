@@ -13,7 +13,8 @@ Roteiro em `docs/specs/2026-11-24-c1-reserva-makerspace-design.md` (§9).
 - **1.3 Tipos e máquinas: concluído.** `GET`, `POST` e `PUT` de tipos de equipamento e de máquinas (a Coordenação cadastra e altera; qualquer pessoa logada consulta, inclusive as máquinas inativas), com nome único sem diferenciar maiúsculas e minúsculas. No Compose e no ambiente de desenvolvimento, a API sobe com dados de exemplo do Itec Park (ADR 0004). O CI passou para as versões das actions que rodam no Node 24, e o Dockerfile usa o mesmo SDK do `global.json`.
 - **1.4 Treinamentos: concluído.** A Equipe e a Coordenação registram e revogam treinamentos (pessoa por tipo de equipamento, válidos por 12 meses); renovar é registrar outro, e o histórico fica. Cada pessoa vê os seus em `GET /me/treinamentos`. A situação (válido, vencido ou revogado) é calculada pelo relógio da API, que vale também na validação do JWT (ADR 0005). Os dados de exemplo ganharam treinamentos.
 - **1.5 Reservas, o núcleo: concluído.** Qualquer pessoa logada reserva uma máquina (`POST /reservas`) com as regras da §4.2 da spec: treinamento válido até o fim da reserva, sem sobreposição (mesmo com pedidos simultâneos), duração máxima do tipo, até 7 dias de antecedência e no máximo 2 reservas pessoais ativas. A Equipe e a Coordenação também fazem demandas do parque (até 30 dias, sem duração máxima). Cada pessoa vê e cancela as suas, e a Equipe lista as de todos. Revogar um treinamento cancela as reservas futuras da pessoa no tipo, e uma máquina com reservas futuras não é desativada. A concorrência está no ADR 0006.
-- 1.6 a 1.10: disponibilidade e desmarcação, manutenção, Blazor e deploy.
+- **1.6 Disponibilidade, agenda e desmarcação: concluído.** `GET /disponibilidade` lista as máquinas livres de um tipo num intervalo, e `GET /equipamentos/{id}/agenda` mostra as reservas de uma máquina numa janela de até 31 dias (o nome de quem reservou só aparece para a Equipe; o Usuário o vê nas reservas dele). A Equipe e a Coordenação podem desmarcar reservas pessoais para encaixar uma demanda do parque, com o campo `motivoDesmarcacao` do `POST /reservas` e as 4 travas da spec, na mesma transação da criação. Todo 409 de agenda traz também as máquinas livres. As decisões estão no ADR 0007.
+- 1.7 a 1.10: manutenção, Blazor e deploy.
 
 ## Como rodar
 
@@ -97,13 +98,30 @@ Rotas de reservas:
 
 | Rota | Quem | O que faz |
 |---|---|---|
-| `POST /reservas` | Qualquer pessoa logada | Reserva `{ equipamentoId, inicio, fim, finalidade, solicitante?, descricao? }` e responde 201 com `Location`. O operador é sempre quem pede. `finalidade` é `ProjetoPessoal` ou `DemandaDoParque` (esta só para a Equipe e a Coordenação; o `solicitante` só nela) |
+| `POST /reservas` | Qualquer pessoa logada | Reserva `{ equipamentoId, inicio, fim, finalidade, solicitante?, descricao?, motivoDesmarcacao? }` e responde 201 com `Location`. O operador é sempre quem pede. `finalidade` é `ProjetoPessoal` ou `DemandaDoParque` (esta só para a Equipe e a Coordenação; o `solicitante` e o `motivoDesmarcacao` só nela, e o motivo tem até 500 caracteres) |
 | `GET /reservas/{id}` | O dono ou a Equipe | Consulta uma reserva; a de outra pessoa responde 403 |
 | `GET /me/reservas` | Qualquer pessoa logada | As próprias reservas, inclusive as canceladas e o motivo, do início mais recente para o mais antigo |
-| `POST /reservas/{id}/cancelamento` | Só o dono | Cancela, sem corpo, antes do início (`CanceladaPeloDono`). Já cancelada ou já começada, 409; a Equipe também recebe 403 (desmarcar a reserva de outra pessoa é do 1.6) |
+| `POST /reservas/{id}/cancelamento` | Só o dono | Cancela, sem corpo, antes do início (`CanceladaPeloDono`). Já cancelada ou já começada, 409; a Equipe também recebe 403 (a reserva de outra pessoa só sai por uma desmarcação, no `POST /reservas`) |
 | `GET /reservas` | Equipe | Lista as de todos, com os filtros opcionais `?usuarioId=` e `?equipamentoId=` |
 
 Os horários precisam trazer o fuso (`2026-12-01T10:00:00-03:00` ou `...Z`): sem ele a resposta é 400, porque o .NET leria o horário no fuso do servidor, que muda de máquina para máquina. A API grava e devolve em UTC. A ordem dos códigos de erro de `POST /reservas`: formato (400), papel (403), regras (422) e, por último, a agenda (409, com a lista `conflitos`: início, fim e finalidade de cada reserva que cruza). Os limites são inclusivos: começar agora, durar exatamente a máxima do tipo, começar em exatamente 7 dias e acabar exatamente no último instante do treinamento são aceitos. Desativar ou trocar o tipo de uma máquina com reservas ativas que ainda não acabaram (`PUT /equipamentos/{id}`) responde 409 com a mesma lista `conflitos`; renomear e reativar continuam livres.
+
+Rotas de disponibilidade e agenda (qualquer pessoa logada):
+
+| Rota | O que faz |
+|---|---|
+| `GET /disponibilidade?tipoId=&inicio=&fim=` | As máquinas **ativas** do tipo sem reserva ativa que cruze `[inicio, fim)`, em ordem de nome, no formato do `GET /equipamentos`. Sem nenhuma livre, a lista vem vazia. Sem limite de janela. `tipoId` que não existe, 400 |
+| `GET /equipamentos/{id}/agenda?de=&ate=` | `{ equipamentoId, equipamentoNome, de, ate, reservas }`: as reservas ativas que cruzam `[de, ate)` (inclusive a que começou antes e a que acaba depois), em ordem de início. Janela de até 31 dias (exatamente 31 passa; 1 segundo a mais, 400). Máquina inexistente, 404; máquina inativa tem agenda |
+
+Os três parâmetros de cada rota são obrigatórios e os horários exigem o fuso, como no corpo (na URL, o `+` vira espaço: use `Z`, `-03:00` ou `%2B03:00`). Cada reserva da agenda traz `inicio`, `fim` e `finalidade`; a Equipe e a Coordenação veem também `reservaId`, `operadorNome` e `solicitante`. O Usuário vê esses três só nas reservas dele (nas dos outros eles nem aparecem no JSON), e assim a tela marca "sua reserva" sem expor ninguém. A lista `conflitos` dos 409 tem a mesma forma.
+
+**Desmarcação.** Uma demanda do parque que cruza só reservas pessoais pode levar `motivoDesmarcacao`. Sem o motivo (ou só com espaços), o resultado é o 409 de sempre, com `conflitos` e `maquinasLivres`, para a tela perguntar. Com o motivo, as travas rodam nesta ordem, e cada recusa é um 409 com a mensagem no `detail` (nada é cancelado):
+
+1. algum conflito é uma demanda do parque: "Uma demanda do parque não desmarca outra.";
+2. alguma pessoal começa em até 24 h (o limite é estrito: só se desmarca quem começa em *mais* de 24 h; uma reserva em andamento também recusa);
+3. outra máquina ativa do tipo está livre no intervalo inteiro: o 409 cita a máquina e a lista em `maquinasLivres`.
+
+Passando as três, as pessoais viram `CanceladaPelaEquipe` (com o motivo, quem desmarcou e quando) e a demanda é criada, tudo na mesma transação. O dono vê o cancelamento e o motivo em `GET /me/reservas`. Se o dono cancelou no meio do caminho, a demanda sai do mesmo jeito e o cancelamento dele fica como está. A ordem dos códigos do `POST /reservas` não muda: 400, 403, 422 e 409.
 
 ## Como testar
 
@@ -128,7 +146,7 @@ flowchart LR
     EF --> PG[("PostgreSQL 17")]
 ```
 
-- `Dominio` guarda as regras (hoje, o `Intervalo` semiaberto, o `Papel`, o tipo de equipamento, a máquina, o treinamento com a validade e a revogação e a reserva com as regras da criação e o cancelamento) sem depender de banco nem de web, e por isso tem testes de unidade rápidos, sem Docker.
+- `Dominio` guarda as regras (hoje, o `Intervalo` semiaberto, o `Papel`, o tipo de equipamento, a máquina, o treinamento com a validade e a revogação e a reserva com as regras da criação e o cancelamento, e as travas da desmarcação) sem depender de banco nem de web, e por isso tem testes de unidade rápidos, sem Docker.
 - `Contratos` guarda os DTOs de pedido e resposta, compartilhados com o Blazor. Referencia só o `Dominio`.
 - `Api` expõe as rotas, autentica (Identity e JWT), aplica as migrations na subida e responde os erros em ProblemDetails, com títulos em português.
 - `Testes.Integracao` sobe a API inteira (`WebApplicationFactory`) contra um PostgreSQL real em container.
@@ -141,6 +159,7 @@ flowchart LR
 - [0004. Dados de exemplo na subida](docs/decisoes/0004-dados-de-exemplo-na-subida.md)
 - [0005. Um relógio só](docs/decisoes/0005-um-relogio-so.md)
 - [0006. Concorrência nas reservas](docs/decisoes/0006-concorrencia-nas-reservas.md)
+- [0007. Desmarcação na criação da reserva](docs/decisoes/0007-desmarcacao-na-criacao-da-reserva.md)
 
 ## Roteiro de entrevista
 
@@ -166,9 +185,15 @@ flowchart LR
 - **Por que `FOR NO KEY UPDATE` e uma ordem fixa das travas?** `FOR NO KEY UPDATE` põe em fila quem trava a mesma linha, mas não segura quem só grava uma linha com chave estrangeira apontando para ela (a checagem da chave estrangeira usa `FOR KEY SHARE`). Com `FOR UPDATE`, quem grava uma linha apontando para a pessoa (registrar um treinamento dela, ou ela mesma revogar um) esperaria a reserva terminar. E toda transação pega as travas na mesma ordem (máquina, treinamentos, pessoa), o que evita deadlock: num teste, com `FOR UPDATE` na pessoa e essa trava antes da dos treinamentos, a Equipe que revoga o próprio treinamento enquanto reserva caiu em deadlock (erro 40P01), porque a revogação esperava a reserva e a reserva esperava a revogação. O limite de 2 reservas pessoais precisa da trava na pessoa: sem ela, três pedidos simultâneos em máquinas diferentes passariam todos.
 - **O que acontece com a reserva em andamento de quem teve o treinamento revogado?** Continua. A impressão já está rodando, e cancelá-la deixaria a máquina livre na agenda com a peça ainda sendo impressa. A revogação cancela só o que não começou. Para parar a máquina na hora, a Equipe registra uma manutenção (1.7), o mesmo caminho que a spec dá para tirar uma máquina de uso.
 
+- **Por que a desmarcação está dentro da criação da reserva, e não numa rota própria?** Uma rota que desmarca, seguida do `POST` da demanda, seriam dois pedidos: entre eles, outra pessoa pega o horário liberado, ou o segundo falha e deixa a reserva desmarcada sem demanda. Dentro do `POST /reservas`, o `UPDATE` que cancela as pessoais e o `INSERT` da demanda rodam na mesma transação, sob a trava da máquina que a criação já pegou, e o commit vem no fim (ver o ADR 0007).
+- **Como o teste prova que é uma transação só?** Uma fábrica de teste registra, por `ConfigureDbContext`, um interceptador de comandos do EF Core. Depois de montar o cenário, o teste o arma para falhar todo `INSERT` em `reservas`: o `UPDATE` da desmarcação já rodou quando o `INSERT` da demanda falha. A resposta é 500, e a reserva pessoal continua `Ativa`, sem motivo nem data de cancelamento. Desarmado, o mesmo pedido desmarca e cria, o que mostra que a falha era a única coisa no caminho. Um segundo gancho do mesmo interceptador faz o dono cancelar no meio do pedido, e o teste confere que o `UPDATE ... WHERE situacao = 'Ativa'` não sobrescreve o cancelamento dele.
+- **Por que a trava das outras máquinas não trava as outras máquinas?** A trava 2 só precisa saber se existe outra máquina do tipo livre. Travar todas as máquinas do tipo para ter essa certeza poria em fila todas as reservas do tipo, para um ganho que não aparece no tamanho de um makerspace. Lendo sem travar, o pior caso é uma desmarcação feita quando aquela máquina acabou de ficar livre, ou uma sugestão de máquina que alguém acabou de pegar, e a tela tenta de novo. Nunca há sobreposição, porque isso quem garante é a trava da máquina pedida e a restrição de exclusão. Um detalhe que os testes de concorrência pegaram: a própria máquina pedida fica fora dessa consulta, porque, se a reserva em conflito for cancelada no meio, a máquina pedida pareceria "outra" máquina livre.
+- **Por que toda recusa da desmarcação é 409, e não 422?** O pedido não tem erro de regra de negócio: o horário está ocupado, e é isso que o 409 diz. Cada recusa só explica por que esse conflito não se resolve desmarcando (outra demanda, menos de 24 h, outra máquina livre). Assim a tela trata uma coisa só, um 409 com `conflitos` e `maquinasLivres`, e a ordem 400, 403, 422 e 409 do `POST /reservas` não muda.
+- **Como se testa a borda das 24 h?** As travas ficam numa classe do domínio (`Desmarcacao`) que recebe o "agora" por parâmetro, e os testes de unidade usam o `FakeTimeProvider`: 24 h e 1 s desmarca, exatamente 24 h e 23 h 59 min 59 s recusam. O mesmo vale na API, com a fábrica de relógio falso. O relógio só anda para a frente, e por isso o teste faz primeiro a borda que desmarca e deixa a reserva em andamento para o fim.
+
 ## Próximos passos
 
-- 1.6: `GET /disponibilidade` (máquinas do tipo livres no intervalo), a agenda da máquina e a desmarcação de reservas pessoais para uma demanda do parque, com as travas da spec.
+- 1.7: a manutenção, que cancela as reservas do intervalo (`CanceladaPorManutencao`), entra na agenda (`manutencoes`), na consulta de máquinas livres e na trava "manutenção não se desmarca".
 - 1.10: limite de tentativas de login (*rate limiter* por IP), junto do deploy.
 
 ## Como foi feito

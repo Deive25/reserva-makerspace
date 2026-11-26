@@ -90,6 +90,9 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
     /// por último, a agenda (409). A transação trava, nesta ordem e até o commit: a máquina, os treinamentos da pessoa
     /// no tipo e (só no projeto pessoal) a linha da pessoa. Só depois lê o que decide: em READ COMMITTED cada comando
     /// enxerga o que já foi confirmado quando começa, e por isso a leitura vem depois da trava (ADR 0006).
+    /// Numa demanda do parque que cruza reservas pessoais, as travas da desmarcação (<see cref="Desmarcacao"/>) decidem se
+    /// o pedido as cancela, na mesma transação e antes do <c>INSERT</c> da demanda (ADR 0007). Todo 409 de agenda traz também
+    /// as máquinas livres do tipo.
     /// </summary>
     [HttpPost]
     [ProducesResponseType<ReservaResposta>(StatusCodes.Status201Created)]
