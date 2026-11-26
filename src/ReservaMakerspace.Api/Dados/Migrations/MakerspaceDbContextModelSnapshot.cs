@@ -233,6 +233,71 @@ namespace ReservaMakerspace.Api.Dados.Migrations
                     b.ToTable("equipamentos", (string)null);
                 });
 
+            modelBuilder.Entity("ReservaMakerspace.Dominio.Manutencao", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("EncerradaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("encerrada_em");
+
+                    b.Property<Guid?>("EncerradaPorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("encerrada_por_id");
+
+                    b.Property<Guid>("EquipamentoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("equipamento_id");
+
+                    b.Property<DateTimeOffset>("Fim")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fim");
+
+                    b.Property<DateTimeOffset>("Inicio")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("inicio");
+
+                    b.Property<string>("Motivo")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("motivo");
+
+                    b.Property<DateTimeOffset>("RegistradaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("registrada_em");
+
+                    b.Property<Guid>("RegistradaPorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("registrada_por_id");
+
+                    b.Property<string>("Situacao")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("situacao");
+
+                    b.HasKey("Id")
+                        .HasName("pk_manutencoes");
+
+                    b.HasIndex("EncerradaPorId")
+                        .HasDatabaseName("ix_manutencoes_encerrada_por_id");
+
+                    b.HasIndex("EquipamentoId")
+                        .HasDatabaseName("ix_manutencoes_equipamento_id");
+
+                    b.HasIndex("RegistradaPorId")
+                        .HasDatabaseName("ix_manutencoes_registrada_por_id");
+
+                    b.ToTable("manutencoes", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_manutencoes_fim_depois_do_inicio", "fim > inicio");
+                        });
+                });
+
             modelBuilder.Entity("ReservaMakerspace.Dominio.Reserva", b =>
                 {
                     b.Property<Guid>("Id")
@@ -439,6 +504,29 @@ namespace ReservaMakerspace.Api.Dados.Migrations
                         .HasConstraintName("fk_equipamentos_tipos_de_equipamento_tipo_id");
 
                     b.Navigation("Tipo");
+                });
+
+            modelBuilder.Entity("ReservaMakerspace.Dominio.Manutencao", b =>
+                {
+                    b.HasOne("ReservaMakerspace.Api.Dados.Usuario", null)
+                        .WithMany()
+                        .HasForeignKey("EncerradaPorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_manutencoes_asp_net_users_encerrada_por_id");
+
+                    b.HasOne("ReservaMakerspace.Dominio.Equipamento", null)
+                        .WithMany()
+                        .HasForeignKey("EquipamentoId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_manutencoes_equipamentos_equipamento_id");
+
+                    b.HasOne("ReservaMakerspace.Api.Dados.Usuario", null)
+                        .WithMany()
+                        .HasForeignKey("RegistradaPorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_manutencoes_asp_net_users_registrada_por_id");
                 });
 
             modelBuilder.Entity("ReservaMakerspace.Dominio.Reserva", b =>

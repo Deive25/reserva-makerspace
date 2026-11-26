@@ -25,6 +25,12 @@ public class MakerspaceDbContext(DbContextOptions<MakerspaceDbContext> opcoes)
     /// </summary>
     public const string RestricaoDeSobreposicaoDasReservas = "ex_reservas_sem_sobreposicao";
 
+    /// <summary>
+    /// A restrição de exclusão das manutenções, no mesmo molde da das reservas: entra por SQL na migração <c>Manutencoes</c>
+    /// (e sai no <c>Down</c>), com este nome fixo, e a violação (23P01) vira 409 (ADR 0008).
+    /// </summary>
+    public const string RestricaoDeSobreposicaoDasManutencoes = "ex_manutencoes_sem_sobreposicao";
+
     public DbSet<TipoDeEquipamento> TiposDeEquipamento => Set<TipoDeEquipamento>();
 
     public DbSet<Equipamento> Equipamentos => Set<Equipamento>();
@@ -32,6 +38,8 @@ public class MakerspaceDbContext(DbContextOptions<MakerspaceDbContext> opcoes)
     public DbSet<Treinamento> Treinamentos => Set<Treinamento>();
 
     public DbSet<Reserva> Reservas => Set<Reserva>();
+
+    public DbSet<Manutencao> Manutencoes => Set<Manutencao>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -93,6 +101,22 @@ public class MakerspaceDbContext(DbContextOptions<MakerspaceDbContext> opcoes)
             reserva.HasOne<Equipamento>().WithMany().HasForeignKey(r => r.EquipamentoId).OnDelete(DeleteBehavior.Restrict);
             reserva.HasOne<Usuario>().WithMany().HasForeignKey(r => r.OperadorId).OnDelete(DeleteBehavior.Restrict);
             reserva.HasOne<Usuario>().WithMany().HasForeignKey(r => r.CanceladaPorId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // A manutenção segue o padrão da reserva: chaves para usuarios declaradas aqui, sem cascata.
+        // Atenção: a tabela tem uma restrição de exclusão (RestricaoDeSobreposicaoDasManutencoes) que NÃO aparece neste
+        // modelo, porque o EF Core não a conhece. Ela vem da migração Manutencoes, por SQL; ao recriar ou apagar essa
+        // migração, a restrição precisa ser recriada à mão. O CHECK (fim > inicio) está declarado abaixo.
+        // Entre uma reserva e uma manutenção não há restrição do banco: só a trava da máquina garante (ADR 0008).
+        modelBuilder.Entity<Manutencao>(manutencao =>
+        {
+            manutencao.ToTable("manutencoes", tabela => tabela.HasCheckConstraint("ck_manutencoes_fim_depois_do_inicio", "fim > inicio"));
+            manutencao.HasKey(m => m.Id);
+            manutencao.Property(m => m.Situacao).HasConversion<string>().HasMaxLength(20);
+            manutencao.Property(m => m.Motivo).HasMaxLength(Manutencao.TamanhoMaximoDoMotivo);
+            manutencao.HasOne<Equipamento>().WithMany().HasForeignKey(m => m.EquipamentoId).OnDelete(DeleteBehavior.Restrict);
+            manutencao.HasOne<Usuario>().WithMany().HasForeignKey(m => m.RegistradaPorId).OnDelete(DeleteBehavior.Restrict);
+            manutencao.HasOne<Usuario>().WithMany().HasForeignKey(m => m.EncerradaPorId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Usuario>(usuario =>
