@@ -14,7 +14,8 @@ Roteiro em `docs/specs/2026-11-24-c1-reserva-makerspace-design.md` (§9).
 - **1.4 Treinamentos: concluído.** A Equipe e a Coordenação registram e revogam treinamentos (pessoa por tipo de equipamento, válidos por 12 meses); renovar é registrar outro, e o histórico fica. Cada pessoa vê os seus em `GET /me/treinamentos`. A situação (válido, vencido ou revogado) é calculada pelo relógio da API, que vale também na validação do JWT (ADR 0005). Os dados de exemplo ganharam treinamentos.
 - **1.5 Reservas, o núcleo: concluído.** Qualquer pessoa logada reserva uma máquina (`POST /reservas`) com as regras da §4.2 da spec: treinamento válido até o fim da reserva, sem sobreposição (mesmo com pedidos simultâneos), duração máxima do tipo, até 7 dias de antecedência e no máximo 2 reservas pessoais ativas. A Equipe e a Coordenação também fazem demandas do parque (até 30 dias, sem duração máxima). Cada pessoa vê e cancela as suas, e a Equipe lista as de todos. Revogar um treinamento cancela as reservas futuras da pessoa no tipo, e uma máquina com reservas futuras não é desativada. A concorrência está no ADR 0006.
 - **1.6 Disponibilidade, agenda e desmarcação: concluído.** `GET /disponibilidade` lista as máquinas livres de um tipo num intervalo, e `GET /equipamentos/{id}/agenda` mostra as reservas de uma máquina numa janela de até 31 dias (o nome de quem reservou só aparece para a Equipe; o Usuário o vê nas reservas dele). A Equipe e a Coordenação podem desmarcar reservas pessoais para encaixar uma demanda do parque, com o campo `motivoDesmarcacao` do `POST /reservas` e as 4 travas da spec, na mesma transação da criação. Todo 409 de agenda traz também as máquinas livres. As decisões estão no ADR 0007.
-- 1.7 a 1.10: manutenção, Blazor e deploy.
+- **1.7 Manutenção: concluído.** A Equipe e a Coordenação registram uma manutenção numa máquina (`POST /equipamentos/{id}/manutencoes`), que cancela toda reserva ativa que cruze o intervalo (`CanceladaPorManutencao`, inclusive a em andamento e as das duas finalidades) e bloqueia reservas novas. Uma manutenção não se sobrepõe a outra, e a Equipe pode encerrá-la antes do fim. A manutenção aparece na agenda (`manutencoes`), na consulta de máquinas livres, na regra de conflito do `POST /reservas` e na trava "manutenção não se desmarca". Com isso a API está completa. As decisões estão no ADR 0008.
+- 1.8 a 1.10: Blazor e deploy.
 
 ## Como rodar
 
@@ -92,7 +93,7 @@ Rotas de treinamentos:
 | `POST /treinamentos/{id}/revogacao` | Equipe | Revoga com `{ motivo }` (até 500 caracteres); revoga também os outros ainda válidos da pessoa no tipo. Já revogado ou vencido, 409 |
 | `GET /me/treinamentos` | Qualquer pessoa logada | Só os treinamentos da própria pessoa, com a situação, quem registrou e, se houver, quem revogou e por quê |
 
-"Equipe" vale também para a Coordenação. Não há `PUT` nem `DELETE`: o histórico não se apaga, e revogar é a única mudança. Revogar também cancela, na mesma transação, as reservas ativas da pessoa nas máquinas do tipo que ainda não começaram (`CanceladaPelaEquipe`, motivo "Treinamento revogado"); a reserva em andamento continua, e parar a máquina na hora será uma manutenção (1.7).
+"Equipe" vale também para a Coordenação. Não há `PUT` nem `DELETE`: o histórico não se apaga, e revogar é a única mudança. Revogar também cancela, na mesma transação, as reservas ativas da pessoa nas máquinas do tipo que ainda não começaram (`CanceladaPelaEquipe`, motivo "Treinamento revogado"); a reserva em andamento continua, e parar a máquina na hora é uma manutenção (1.7).
 
 Rotas de reservas:
 
@@ -110,14 +111,25 @@ Rotas de disponibilidade e agenda (qualquer pessoa logada):
 
 | Rota | O que faz |
 |---|---|
-| `GET /disponibilidade?tipoId=&inicio=&fim=` | As máquinas **ativas** do tipo sem reserva ativa que cruze `[inicio, fim)`, em ordem de nome, no formato do `GET /equipamentos`. Sem nenhuma livre, a lista vem vazia. Sem limite de janela. `tipoId` que não existe, 400 |
-| `GET /equipamentos/{id}/agenda?de=&ate=` | `{ equipamentoId, equipamentoNome, de, ate, reservas }`: as reservas ativas que cruzam `[de, ate)` (inclusive a que começou antes e a que acaba depois), em ordem de início. Janela de até 31 dias (exatamente 31 passa; 1 segundo a mais, 400). Máquina inexistente, 404; máquina inativa tem agenda |
+| `GET /disponibilidade?tipoId=&inicio=&fim=` | As máquinas **ativas** do tipo sem reserva nem manutenção ativa que cruze `[inicio, fim)`, em ordem de nome, no formato do `GET /equipamentos`. Sem nenhuma livre, a lista vem vazia. Sem limite de janela. `tipoId` que não existe, 400 |
+| `GET /equipamentos/{id}/agenda?de=&ate=` | `{ equipamentoId, equipamentoNome, de, ate, reservas, manutencoes }`: as reservas e as manutenções ativas que cruzam `[de, ate)` (inclusive a que começou antes e a que acaba depois), em ordem de início. Janela de até 31 dias (exatamente 31 passa; 1 segundo a mais, 400). Máquina inexistente, 404; máquina inativa tem agenda |
 
 Os três parâmetros de cada rota são obrigatórios e os horários exigem o fuso, como no corpo (na URL, o `+` vira espaço: use `Z`, `-03:00` ou `%2B03:00`). Cada reserva da agenda traz `inicio`, `fim` e `finalidade`; a Equipe e a Coordenação veem também `reservaId`, `operadorNome` e `solicitante`. O Usuário vê esses três só nas reservas dele (nas dos outros eles nem aparecem no JSON), e assim a tela marca "sua reserva" sem expor ninguém. A lista `conflitos` dos 409 tem a mesma forma.
 
+Rotas de manutenção (todas da Equipe e da Coordenação):
+
+| Rota | O que faz |
+|---|---|
+| `POST /equipamentos/{id}/manutencoes` | Registra `{ inicio?, fim, motivo }` e responde 201 com `Location`. Sem `inicio`, a manutenção começa agora ("parar a máquina agora"); com ele, não pode ser no passado (422). O `motivo` é obrigatório (até 500 caracteres). Máquina inexistente, 404; máquina inativa também aceita. Outra manutenção ativa no intervalo, 409 com a lista `manutencoes` |
+| `POST /manutencoes/{id}/encerramento` | Sem corpo. Em andamento, o fim passa a ser agora e ela continua ativa; ainda não começou, fica `Cancelada`. Já acabou ou já cancelada, 409. Qualquer pessoa da Equipe encerra, e não só quem registrou |
+| `GET /equipamentos/{id}/manutencoes` | Todas as da máquina, inclusive as canceladas e as passadas, do início mais recente para o mais antigo |
+| `GET /manutencoes/{id}` | Consulta uma manutenção, com quem registrou e quem encerrou |
+
+A manutenção cancela, na mesma transação do registro, as reservas ativas da máquina que cruzam `[inicio, fim)`: `CanceladaPorManutencao`, com o motivo da manutenção, quem registrou e quando. Ficam intactas as que só encostam nas bordas, as já canceladas (com o motivo de antes) e as de outra máquina. O dono vê o cancelamento em `GET /me/reservas`; a resposta 201 não lista as reservas canceladas, que a Equipe vê em `GET /reservas?equipamentoId=`. Encerrar não traz as reservas de volta. Enquanto a manutenção está ativa, o `POST /reservas` que cruza o intervalo responde 409 com "A máquina está em manutenção nesse horário." (uma reserva encostada é aceita), e a máquina sai do `GET /disponibilidade` e da lista `maquinasLivres`. Todo 409 de agenda traz agora `conflitos`, `maquinasLivres` e `manutencoes` (vazia quando não há manutenção). Uma demanda com `motivoDesmarcacao` sobre uma manutenção recebe 409 "Uma manutenção não se desmarca.", e nada é cancelado. A agenda traz as manutenções ativas que cruzam a janela, em `manutencoes`, com `manutencaoId`, `inicio`, `fim` e `motivo`, iguais para todo mundo (quem registrou só aparece nas rotas da Equipe).
+
 **Desmarcação.** Uma demanda do parque que cruza só reservas pessoais pode levar `motivoDesmarcacao`. Sem o motivo (ou só com espaços), o resultado é o 409 de sempre, com `conflitos` e `maquinasLivres`, para a tela perguntar. Com o motivo, as travas rodam nesta ordem, e cada recusa é um 409 com a mensagem no `detail` (nada é cancelado):
 
-1. algum conflito é uma demanda do parque: "Uma demanda do parque não desmarca outra.";
+1. algum conflito é uma demanda do parque: "Uma demanda do parque não desmarca outra." (uma manutenção no intervalo recusa antes de tudo, com "Uma manutenção não se desmarca.");
 2. alguma pessoal começa em até 24 h (o limite é estrito: só se desmarca quem começa em *mais* de 24 h; uma reserva em andamento também recusa);
 3. outra máquina ativa do tipo está livre no intervalo inteiro: o 409 cita a máquina e a lista em `maquinasLivres`.
 
@@ -160,6 +172,7 @@ flowchart LR
 - [0005. Um relógio só](docs/decisoes/0005-um-relogio-so.md)
 - [0006. Concorrência nas reservas](docs/decisoes/0006-concorrencia-nas-reservas.md)
 - [0007. Desmarcação na criação da reserva](docs/decisoes/0007-desmarcacao-na-criacao-da-reserva.md)
+- [0008. Manutenção e a trava da máquina](docs/decisoes/0008-manutencao-e-a-trava-da-maquina.md)
 
 ## Roteiro de entrevista
 
@@ -189,10 +202,15 @@ flowchart LR
 - **Por que a trava 2 (outra máquina livre) não trava as outras máquinas do tipo?** A trava 2 só precisa saber se existe outra máquina do tipo livre. Travar todas as máquinas do tipo para ter essa certeza poria em fila todas as reservas do tipo, para um ganho que não aparece no tamanho de um makerspace. Lendo sem travar, o pior caso é uma desmarcação feita quando aquela máquina acabou de ficar livre, ou uma sugestão de máquina que alguém acabou de pegar, e a tela tenta de novo. Nunca há sobreposição, porque isso quem garante é a trava da máquina pedida e a restrição de exclusão. Um detalhe que os testes de concorrência pegaram: a própria máquina pedida fica fora dessa consulta, porque, se a reserva em conflito for cancelada no meio, a máquina pedida pareceria "outra" máquina livre.
 - **Por que toda recusa da desmarcação é 409, e não 422?** O pedido não tem erro de regra de negócio: o horário está ocupado, e é isso que o 409 diz. Cada recusa só explica por que esse conflito não se resolve desmarcando (outra demanda, menos de 24 h, outra máquina livre). Assim a tela trata uma coisa só, um 409 com `conflitos` e `maquinasLivres`, e a ordem 400, 403, 422 e 409 do `POST /reservas` não muda.
 - **Como se testa a borda das 24 h?** As travas ficam numa classe do domínio (`Desmarcacao`) que recebe o "agora" por parâmetro, e os testes de unidade usam o `FakeTimeProvider`: 24 h e 1 s desmarca, exatamente 24 h e 23 h 59 min 59 s recusam. O mesmo vale na API, com a fábrica de relógio falso. O relógio só anda para a frente, e por isso o teste faz primeiro a borda que desmarca e deixa a reserva em andamento para o fim.
+- **Por que a manutenção usa a mesma trava da máquina que a reserva?** Porque o que se quer evitar é uma reserva ativa dentro de uma manutenção ativa, e isso só se evita se os dois caminhos que gravam na agenda ficarem em fila. Registrar a manutenção trava a linha da máquina (`FOR NO KEY UPDATE`) antes de ler o que decide, exatamente como a criação da reserva: se a reserva chegou antes, a manutenção a vê e a cancela; se chegou depois, a reserva vê a manutenção e recebe 409. Encerrar também trava, para a regra ser uma só ("toda escrita de manutenção passa pela trava") e dois encerramentos darem um 200 e um 409 (ver o ADR 0008).
+- **Por que há restrição de exclusão entre duas manutenções, e não entre uma reserva e uma manutenção?** Uma restrição de exclusão só enxerga uma tabela, e a reserva e a manutenção moram em tabelas diferentes. Entre manutenções, a restrição (`EXCLUDE USING gist`, só nas ativas) é a garantia final, no mesmo molde das reservas, e um teste a viola por SQL direto. Entre reserva e manutenção só a trava da máquina garante, e isso está dito como o ponto fraco no ADR. As alternativas (a manutenção como uma linha de `reservas` com outra finalidade, ou um *trigger*) misturariam dois conceitos ou teriam a mesma corrida.
+- **O que acontece com a reserva em andamento quando a máquina é parada?** É cancelada também (`CanceladaPorManutencao`). A máquina quebrou, e manter a reserva ativa deixaria a agenda dizendo que alguém a está usando. O dono vê o cancelamento, com o motivo e quem registrou, em `GET /me/reservas`; não há aviso por e-mail. Quem registra "agora" não manda o `inicio`: o servidor usa o relógio dele, porque o horário do navegador chegaria alguns milissegundos no passado e seria recusado.
+- **Como o encerramento decide entre encurtar e cancelar?** Pelo relógio, no domínio: se a manutenção está em andamento, o fim passa a ser o agora e ela continua ativa; se ainda não começou, fica cancelada. A que começa exatamente agora conta como "não começou", porque mudar o fim para o agora deixaria o intervalo vazio e violaria o `CHECK (fim > inicio)`. Já acabou ou já cancelada dá 409. Os testes usam o `FakeTimeProvider` nas bordas: no início, um segundo depois dele, um segundo antes do fim e no fim.
 
 ## Próximos passos
 
-- 1.7: a manutenção, que cancela as reservas do intervalo (`CanceladaPorManutencao`), entra na agenda (`manutencoes`), na consulta de máquinas livres e na trava "manutenção não se desmarca".
+- 1.8: a agenda semanal em Blazor, que mostra as manutenções e usa a lista `manutencoes` dos 409 para explicar por que o horário está fechado.
+- 1.9: as telas da Equipe para registrar, listar e encerrar manutenções, inclusive "parar a máquina agora".
 - 1.10: limite de tentativas de login (*rate limiter* por IP), junto do deploy.
 
 ## Como foi feito
