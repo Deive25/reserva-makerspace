@@ -43,6 +43,10 @@ public class AutorizacaoTests(FabricaDaApi fabrica)
         { "GET", "/reservas/00000000-0000-0000-0000-000000000001" },
         { "POST", "/reservas/00000000-0000-0000-0000-000000000001/cancelamento" },
         { "GET", "/me/reservas" },
+        { "POST", "/equipamentos/00000000-0000-0000-0000-000000000001/manutencoes" },
+        { "GET", "/equipamentos/00000000-0000-0000-0000-000000000001/manutencoes" },
+        { "GET", "/manutencoes/00000000-0000-0000-0000-000000000001" },
+        { "POST", "/manutencoes/00000000-0000-0000-0000-000000000001/encerramento" },
     };
 
     // O corpo do pedido não importa aqui: o login e o papel são checados antes da validação do corpo.
@@ -62,7 +66,7 @@ public class AutorizacaoTests(FabricaDaApi fabrica)
         { Papel.Equipe, "PUT", "/equipamentos/00000000-0000-0000-0000-000000000001" },
     };
 
-    // As rotas da Equipe (as quatro de treinamento e a lista de todas as reservas): o Usuário comum não passa.
+    // As rotas da Equipe (as quatro de treinamento, a lista de todas as reservas e as quatro de manutenção): o Usuário comum não passa.
     // A GET /me/treinamentos e as outras de reserva são de qualquer pessoa logada.
     public static TheoryData<string, string> RotasDaEquipe => new()
     {
@@ -71,6 +75,10 @@ public class AutorizacaoTests(FabricaDaApi fabrica)
         { "GET", "/treinamentos" },
         { "GET", "/treinamentos/00000000-0000-0000-0000-000000000001" },
         { "POST", "/treinamentos/00000000-0000-0000-0000-000000000001/revogacao" },
+        { "POST", "/equipamentos/00000000-0000-0000-0000-000000000001/manutencoes" },
+        { "GET", "/equipamentos/00000000-0000-0000-0000-000000000001/manutencoes" },
+        { "GET", "/manutencoes/00000000-0000-0000-0000-000000000001" },
+        { "POST", "/manutencoes/00000000-0000-0000-0000-000000000001/encerramento" },
     };
 
     private static HttpRequestMessage Pedido(string metodo, string rota, string? token = null)

@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using ReservaMakerspace.Contratos.Equipamentos;
+using ReservaMakerspace.Contratos.Manutencoes;
 using ReservaMakerspace.Contratos.Reservas;
 using ReservaMakerspace.Dominio;
 
@@ -46,6 +47,21 @@ public static class ConsultasDaAgenda
             && r.Situacao == SituacaoDaReserva.Ativa
             && r.Inicio < fim
             && inicio < r.Fim);
+
+    /// <summary>
+    /// As manutenções ativas da máquina que cruzam <c>[inicio, fim)</c>, em ordem de início, na forma pública (igual para
+    /// todo mundo: plano do 1.7, decisão 10). Serve à agenda, ao 409 da reserva e ao 409 do registro de manutenção.
+    /// </summary>
+    public static Task<List<ManutencaoNaAgenda>> ManutencoesAtivasQueCruzamAsync(
+        this MakerspaceDbContext banco, Guid equipamentoId, DateTimeOffset inicio, DateTimeOffset fim) =>
+        banco.Manutencoes.AsNoTracking()
+            .Where(m => m.EquipamentoId == equipamentoId
+                && m.Situacao == SituacaoDaManutencao.Ativa
+                && m.Inicio < fim
+                && inicio < m.Fim)
+            .OrderBy(m => m.Inicio).ThenBy(m => m.Id)
+            .Select(m => new ManutencaoNaAgenda(m.Id, m.Inicio, m.Fim, m.Motivo))
+            .ToListAsync();
 
     /// <summary>Lê as reservas que cumprem o filtro, com o nome do operador, em ordem de início.</summary>
     public static Task<List<LinhaDaAgenda>> LinhasAsync(
