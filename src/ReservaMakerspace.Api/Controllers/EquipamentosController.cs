@@ -5,6 +5,7 @@ using ReservaMakerspace.Api.Autenticacao;
 using ReservaMakerspace.Api.Dados;
 using ReservaMakerspace.Api.Erros;
 using ReservaMakerspace.Contratos.Equipamentos;
+using ReservaMakerspace.Contratos.Reservas;
 using ReservaMakerspace.Dominio;
 
 namespace ReservaMakerspace.Api.Controllers;
@@ -15,7 +16,7 @@ namespace ReservaMakerspace.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("equipamentos")]
-public class EquipamentosController(MakerspaceDbContext banco) : ControllerBase
+public class EquipamentosController(MakerspaceDbContext banco, TimeProvider relogio) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType<List<EquipamentoResposta>>(StatusCodes.Status200OK)]
@@ -69,16 +70,47 @@ public class EquipamentosController(MakerspaceDbContext banco) : ControllerBase
     [ProducesResponseType<EquipamentoResposta>(StatusCodes.Status200OK)]
     public async Task<IActionResult> Alterar(Guid id, PedidoDeEquipamento pedido)
     {
-        var maquina = await banco.Equipamentos.FirstOrDefaultAsync(e => e.Id == id);
-        if (maquina is null)
+        // Trava a linha da máquina antes de conferir as reservas, do mesmo jeito que a criação da reserva (FOR NO KEY
+        // UPDATE, até o commit). Assim o PUT não cruza com uma reserva sendo criada: ou ela já foi confirmada e é vista
+        // abaixo, ou espera este PUT e depois recusa a máquina inativa (ADR 0006).
+        await using var transacao = await banco.Database.BeginTransactionAsync();
+        var achou = await banco.Database
+            .SqlQuery<Guid>($"""SELECT id AS "Value" FROM equipamentos WHERE id = {id} FOR NO KEY UPDATE""")
+            .ToListAsync();
+        if (achou.Count == 0)
         {
             return NaoEncontrado();
         }
 
+        var maquina = await banco.Equipamentos.Include(e => e.Tipo).FirstAsync(e => e.Id == id);
         var tipo = await BuscarTipoAsync(pedido.TipoId!.Value);
         if (tipo is null)
         {
             return TipoInexistente();
+        }
+
+        // Desativar ou trocar o tipo com reservas ativas e futuras é recusado (spec §4.6). Renomear e reativar,
+        // não. Para tirar a máquina de uso na hora, registra-se uma manutenção (1.7).
+        var desativando = maquina.Ativo && !pedido.Ativo!.Value;
+        var trocandoDeTipo = maquina.TipoId != tipo.Id;
+        if (desativando || trocandoDeTipo)
+        {
+            var agora = relogio.GetUtcNow();
+            var reservas = await banco.Reservas.AsNoTracking()
+                .Where(r => r.EquipamentoId == id && r.Situacao == SituacaoDaReserva.Ativa && r.Fim > agora)
+                .OrderBy(r => r.Inicio).ThenBy(r => r.Id)
+                .Select(r => new ConflitoDeAgenda(r.Inicio, r.Fim, r.Finalidade))
+                .ToListAsync();
+            if (reservas.Count > 0)
+            {
+                var problema = ProblemDetailsFactory.CreateProblemDetails(
+                    HttpContext,
+                    StatusCodes.Status409Conflict,
+                    title: TitulosDeErro.Para(StatusCodes.Status409Conflict),
+                    detail: $"A máquina tem reservas ativas que ainda não acabaram. Cancele-as antes de {(desativando ? "desativá-la" : "trocar o tipo")}.");
+                problema.Extensions["conflitos"] = reservas;
+                return new ObjectResult(problema) { StatusCode = StatusCodes.Status409Conflict };
+            }
         }
 
         maquina.Nome = pedido.Nome.Trim();
@@ -90,6 +122,7 @@ public class EquipamentosController(MakerspaceDbContext banco) : ControllerBase
             return conflito;
         }
 
+        await transacao.CommitAsync();
         return Ok(Resposta(maquina));
     }
 

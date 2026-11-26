@@ -20,6 +20,8 @@ namespace ReservaMakerspace.Api.Controllers;
 [Route("treinamentos")]
 public class TreinamentosController(MakerspaceDbContext banco, TimeProvider relogio) : ControllerBase
 {
+    private const string MotivoDoCancelamentoPorRevogacao = "Treinamento revogado";
+
     /// <summary>O treinamento e os nomes que a resposta traz, antes de calcular a situação.</summary>
     // Classe com inicializador de objeto (e não record com construtor): o EF Core só consegue acrescentar
     // Where e OrderBy depois do select quando a projeção é desse tipo.
@@ -135,8 +137,8 @@ public class TreinamentosController(MakerspaceDbContext banco, TimeProvider relo
         }
 
         // A transação trava as linhas da pessoa no tipo, em ordem de id, antes de ler a situação. Dois pedidos
-        // simultâneos ficam em fila: o segundo vê o treinamento já revogado e responde 409. No 1.5, a criação
-        // da reserva vai travar as mesmas linhas, e assim reservar e revogar também ficam em fila.
+        // simultâneos ficam em fila: o segundo vê o treinamento já revogado e responde 409. A criação da reserva
+        // trava as mesmas linhas (FOR SHARE), e assim reservar e revogar também ficam em fila (ADR 0006).
         await using var transacao = await banco.Database.BeginTransactionAsync();
         await banco.Database
             .SqlQuery<Guid>($"""SELECT id AS "Value" FROM treinamentos WHERE usuario_id = {alvo.UsuarioId} AND tipo_id = {alvo.TipoId} ORDER BY id FOR UPDATE""")
@@ -172,6 +174,24 @@ public class TreinamentosController(MakerspaceDbContext banco, TimeProvider relo
         }
 
         await banco.SaveChangesAsync();
+
+        // Sem treinamento, a pessoa não opera mais as máquinas do tipo: cancela, na mesma transação, as reservas
+        // ativas dela nessas máquinas que ainda não começaram (spec §4.6; plano do 1.5, decisões 6 e 8). A reserva em
+        // andamento continua: a impressão já está rodando, e parar a máquina na hora é uma manutenção (1.7). A trava
+        // do FOR UPDATE acima garante que uma reserva em criação (FOR SHARE nas mesmas linhas) já foi confirmada e é
+        // vista aqui, ou ainda não leu os treinamentos e vai recusar a reserva (422). O UPDATE só pega reservas
+        // ainda ativas: o cancelamento que chegou antes (do dono) fica como está.
+        await banco.Reservas
+            .Where(r => r.OperadorId == alvo.UsuarioId
+                && r.Situacao == SituacaoDaReserva.Ativa
+                && r.Inicio > agora
+                && banco.Equipamentos.Any(e => e.Id == r.EquipamentoId && e.TipoId == alvo.TipoId))
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(r => r.Situacao, SituacaoDaReserva.CanceladaPelaEquipe)
+                .SetProperty(r => r.CanceladaEm, agora)
+                .SetProperty(r => r.CanceladaPorId, quemRevoga)
+                .SetProperty(r => r.MotivoDoCancelamento, MotivoDoCancelamentoPorRevogacao));
+
         await transacao.CommitAsync();
 
         var linha = await Consultar().FirstAsync(l => l.Treinamento.Id == id);

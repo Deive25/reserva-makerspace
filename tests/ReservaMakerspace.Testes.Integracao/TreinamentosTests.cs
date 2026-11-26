@@ -358,6 +358,17 @@ public class TreinamentosTests(FabricaDaApi fabrica)
         var outroTipo = await RegistrarOkAsync(cliente, ana.Id, tipoB.Id);
         var outraPessoa = await RegistrarOkAsync(cliente, beto.Id, tipoA.Id);
 
+        // As reservas futuras (plano do 1.5, decisão 8): a da Ana no tipo A, a da Ana no tipo B e a do Beto no tipo A.
+        var auxiliar = new AuxiliarDeReservas(fabrica.Contas);
+        var maquinaA = await auxiliar.CriarMaquinaAsync(tipoA.Id);
+        var maquinaB = await auxiliar.CriarMaquinaAsync(tipoB.Id);
+        using var daAna = fabrica.Contas.ClienteCom(ana.Token);
+        using var doBeto = fabrica.Contas.ClienteCom(beto.Token);
+        var inicio = AuxiliarDeReservas.Daqui(TimeSpan.FromDays(1));
+        var reservaDaAnaNoA = await AuxiliarDeReservas.ReservarOkAsync(daAna, maquinaA.Id, inicio, inicio.AddHours(1));
+        var reservaDaAnaNoB = await AuxiliarDeReservas.ReservarOkAsync(daAna, maquinaB.Id, inicio, inicio.AddHours(1));
+        var reservaDoBetoNoA = await AuxiliarDeReservas.ReservarOkAsync(doBeto, maquinaA.Id, inicio.AddHours(2), inicio.AddHours(3));
+
         Assert.Equal(HttpStatusCode.OK, (await RevogarAsync(cliente, alvo.Id)).StatusCode);
 
         foreach (var intacto in new[] { outroTipo, outraPessoa })
@@ -366,6 +377,17 @@ public class TreinamentosTests(FabricaDaApi fabrica)
                 await cliente.GetAsync($"/treinamentos/{intacto.Id}", TestContext.Current.CancellationToken));
             Assert.Equal(SituacaoDoTreinamento.Valido, atual.Situacao);
         }
+
+        // Só a reserva da pessoa no tipo revogado foi cancelada: com o motivo, quem revogou e a data.
+        var daAnaDepois = await AuxiliarDeReservas.ListarAsync(daAna, "/me/reservas");
+        var cancelada = Assert.Single(daAnaDepois, r => r.Id == reservaDaAnaNoA.Id);
+        Assert.Equal(SituacaoDaReserva.CanceladaPelaEquipe, cancelada.Situacao);
+        Assert.Equal("Treinamento revogado", cancelada.MotivoDoCancelamento);
+        Assert.Equal("Pessoa de Teste", cancelada.CanceladaPorNome);
+        Assert.NotNull(cancelada.CanceladaEm);
+        Assert.Equal(SituacaoDaReserva.Ativa, Assert.Single(daAnaDepois, r => r.Id == reservaDaAnaNoB.Id).Situacao);
+        var doBetoDepois = await AuxiliarDeReservas.ListarAsync(doBeto, "/me/reservas");
+        Assert.Equal(SituacaoDaReserva.Ativa, Assert.Single(doBetoDepois, r => r.Id == reservaDoBetoNoA.Id).Situacao);
     }
 
     [Fact]
