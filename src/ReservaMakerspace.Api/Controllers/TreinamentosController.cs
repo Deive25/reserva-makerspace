@@ -181,6 +181,11 @@ public class TreinamentosController(MakerspaceDbContext banco, TimeProvider relo
         // do FOR UPDATE acima garante que uma reserva em criação (FOR SHARE nas mesmas linhas) já foi confirmada e é
         // vista aqui, ou ainda não leu os treinamentos e vai recusar a reserva (422). O UPDATE só pega reservas
         // ainda ativas: o cancelamento que chegou antes (do dono) fica como está.
+        // Antes do UPDATE, trava as linhas candidatas em ordem de id (a mesma ordem da desmarcação): sem ordem comum,
+        // dois UPDATEs de várias linhas sobre as reservas de um mesmo dono podem se esperar em ciclo (ADR 0007).
+        await banco.Database
+            .SqlQuery<Guid>($"""SELECT r.id AS "Value" FROM reservas r WHERE r.operador_id = {alvo.UsuarioId} AND r.situacao = 'Ativa' AND r.inicio > {agora} AND r.equipamento_id IN (SELECT e.id FROM equipamentos e WHERE e.tipo_id = {alvo.TipoId}) ORDER BY r.id FOR UPDATE""")
+            .ToListAsync();
         await banco.Reservas
             .Where(r => r.OperadorId == alvo.UsuarioId
                 && r.Situacao == SituacaoDaReserva.Ativa

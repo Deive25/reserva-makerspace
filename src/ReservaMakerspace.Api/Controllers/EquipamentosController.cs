@@ -1,9 +1,12 @@
+using System.ComponentModel.DataAnnotations;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ReservaMakerspace.Api.Autenticacao;
 using ReservaMakerspace.Api.Dados;
 using ReservaMakerspace.Api.Erros;
+using ReservaMakerspace.Api.Json;
 using ReservaMakerspace.Contratos.Equipamentos;
 using ReservaMakerspace.Contratos.Reservas;
 using ReservaMakerspace.Dominio;
@@ -18,6 +21,9 @@ namespace ReservaMakerspace.Api.Controllers;
 [Route("equipamentos")]
 public class EquipamentosController(MakerspaceDbContext banco, TimeProvider relogio) : ControllerBase
 {
+    /// <summary>A janela da agenda, inclusive: exatamente 31 dias passa, 1 segundo a mais não (§5).</summary>
+    private const int JanelaMaximaDaAgendaEmDias = 31;
+
     [HttpGet]
     [ProducesResponseType<List<EquipamentoResposta>>(StatusCodes.Status200OK)]
     public async Task<List<EquipamentoResposta>> Listar() =>
@@ -36,6 +42,83 @@ public class EquipamentosController(MakerspaceDbContext banco, TimeProvider relo
             .FirstOrDefaultAsync();
         return maquina is null ? NaoEncontrado() : Ok(maquina);
     }
+
+    /// <summary>
+    /// As máquinas ativas do tipo sem reserva ativa que cruze <c>[inicio, fim)</c>, em ordem de nome (plano do 1.6,
+    /// decisão 1). Sem limite de janela: a resposta tem no máximo as máquinas do tipo, qualquer que seja o intervalo.
+    /// </summary>
+    [HttpGet("/disponibilidade")]
+    [ProducesResponseType<List<EquipamentoResposta>>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Disponibilidade(
+        [FromQuery, Required(ErrorMessage = "Informe o tipo.")] Guid? tipoId,
+        [ModelBinder(typeof(HorarioComFusoBinder)), Required(ErrorMessage = "Informe o início.")] DateTimeOffset? inicio,
+        [ModelBinder(typeof(HorarioComFusoBinder)), Required(ErrorMessage = "Informe o fim.")] DateTimeOffset? fim)
+    {
+        if (fim <= inicio)
+        {
+            ModelState.AddModelError("fim", "O fim precisa ser depois do início.");
+        }
+
+        // Um tipo inexistente na query é erro de validação (400), como no corpo do POST /equipamentos.
+        if (!await banco.TiposDeEquipamento.AnyAsync(t => t.Id == tipoId!.Value))
+        {
+            ModelState.AddModelError("tipoId", "Tipo de equipamento não encontrado.");
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        return Ok(await banco.MaquinasLivresAsync(tipoId!.Value, inicio!.Value, fim!.Value));
+    }
+
+    /// <summary>
+    /// As reservas ativas que cruzam <c>[de, ate)</c>, inclusive a que começou antes e a que acaba depois, em ordem de
+    /// início. Uma máquina inativa também tem agenda. A janela é de até 31 dias (§5). O id e o nome do operador seguem a
+    /// regra da decisão 3: a Equipe vê todos, o Usuário só os das reservas dele.
+    /// </summary>
+    [HttpGet("{id:guid}/agenda")]
+    [ProducesResponseType<AgendaResposta>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Agenda(
+        Guid id,
+        [ModelBinder(typeof(HorarioComFusoBinder)), Required(ErrorMessage = "Informe o início da janela.")] DateTimeOffset? de,
+        [ModelBinder(typeof(HorarioComFusoBinder)), Required(ErrorMessage = "Informe o fim da janela.")] DateTimeOffset? ate)
+    {
+        if (ate <= de)
+        {
+            ModelState.AddModelError("ate", "O fim da janela precisa ser depois do início.");
+        }
+        else if (ate - de > TimeSpan.FromDays(JanelaMaximaDaAgendaEmDias))
+        {
+            ModelState.AddModelError("ate", $"A janela da agenda é de até {JanelaMaximaDaAgendaEmDias} dias.");
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var maquina = await banco.Equipamentos.AsNoTracking()
+            .Where(e => e.Id == id)
+            .Select(e => new { e.Id, e.Nome })
+            .FirstOrDefaultAsync();
+        if (maquina is null)
+        {
+            return NaoEncontrado();
+        }
+
+        var linhas = await banco.ReservasAtivasQueCruzamAsync(id, de!.Value, ate!.Value);
+        var eu = Guid.Parse(User.FindFirstValue("sub")!);
+        var ehDaEquipe = User.IsInRole(nameof(Papel.Equipe)) || User.IsInRole(nameof(Papel.Coordenacao));
+        return Ok(new AgendaResposta(
+            maquina.Id,
+            maquina.Nome,
+            de.Value.ToUniversalTime(),
+            ate.Value.ToUniversalTime(),
+            linhas.Select(l => l.Visivel(eu, ehDaEquipe)).ToList()));
+    }
+
 
     [HttpPost]
     [Authorize(Policy = Politicas.Coordenacao)]
@@ -96,11 +179,10 @@ public class EquipamentosController(MakerspaceDbContext banco, TimeProvider relo
         if (desativando || trocandoDeTipo)
         {
             var agora = relogio.GetUtcNow();
-            var reservas = await banco.Reservas.AsNoTracking()
-                .Where(r => r.EquipamentoId == id && r.Situacao == SituacaoDaReserva.Ativa && r.Fim > agora)
-                .OrderBy(r => r.Inicio).ThenBy(r => r.Id)
-                .Select(r => new ConflitoDeAgenda(r.Inicio, r.Fim, r.Finalidade))
-                .ToListAsync();
+            var linhas = await banco.LinhasAsync(r =>
+                r.EquipamentoId == id && r.Situacao == SituacaoDaReserva.Ativa && r.Fim > agora);
+            // Só a Coordenação chega aqui: vê o id e o nome de todas.
+            var reservas = linhas.Select(l => l.Visivel(Guid.Empty, ehDaEquipe: true)).ToList();
             if (reservas.Count > 0)
             {
                 var problema = ProblemDetailsFactory.CreateProblemDetails(

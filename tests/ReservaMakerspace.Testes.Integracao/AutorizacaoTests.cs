@@ -29,6 +29,8 @@ public class AutorizacaoTests(FabricaDaApi fabrica)
         { "PUT", "/tipos-de-equipamento/00000000-0000-0000-0000-000000000001" },
         { "GET", "/equipamentos" },
         { "GET", "/equipamentos/00000000-0000-0000-0000-000000000001" },
+        { "GET", "/equipamentos/00000000-0000-0000-0000-000000000001/agenda" },
+        { "GET", "/disponibilidade" },
         { "POST", "/equipamentos" },
         { "PUT", "/equipamentos/00000000-0000-0000-0000-000000000001" },
         { "POST", "/treinamentos" },

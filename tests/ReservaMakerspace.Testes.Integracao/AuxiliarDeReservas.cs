@@ -28,12 +28,12 @@ public sealed class AuxiliarDeReservas(AuxiliarDeContas contas)
         return await Json.LerAsync<TipoDeEquipamentoResposta>(resposta);
     }
 
-    public async Task<EquipamentoResposta> CriarMaquinaAsync(Guid tipoId, bool ativo = true)
+    public async Task<EquipamentoResposta> CriarMaquinaAsync(Guid tipoId, bool ativo = true, string prefixo = "Máquina")
     {
         using var coordenacao = await ClienteDaCoordenacaoAsync();
         var resposta = await coordenacao.PostAsJsonAsync(
             "/equipamentos",
-            new { nome = $"Máquina {Guid.NewGuid():N}", tipoId, ativo },
+            new { nome = $"{prefixo} {Guid.NewGuid():N}", tipoId, ativo },
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Created, resposta.StatusCode);
         return await Json.LerAsync<EquipamentoResposta>(resposta);
@@ -89,10 +89,11 @@ public sealed class AuxiliarDeReservas(AuxiliarDeContas contas)
         DateTimeOffset fim,
         string finalidade = "ProjetoPessoal",
         string? solicitante = null,
-        string? descricao = null) =>
+        string? descricao = null,
+        string? motivoDesmarcacao = null) =>
         cliente.PostAsJsonAsync(
             "/reservas",
-            new { equipamentoId, inicio, fim, finalidade, solicitante, descricao },
+            new { equipamentoId, inicio, fim, finalidade, solicitante, descricao, motivoDesmarcacao },
             TestContext.Current.CancellationToken);
 
     public static async Task<ReservaResposta> ReservarOkAsync(
@@ -117,6 +118,14 @@ public sealed class AuxiliarDeReservas(AuxiliarDeContas contas)
         Assert.Equal(HttpStatusCode.OK, resposta.StatusCode);
         return await Json.LerAsync<List<ReservaResposta>>(resposta);
     }
+
+    /// <summary>Meia-noite UTC de hoje mais os dias, para montar horários redondos (<c>Dia(3).AddHours(10)</c>).</summary>
+    public static DateTimeOffset Dia(int dias) =>
+        new DateTimeOffset(TimeProvider.System.GetUtcNow().UtcDateTime.Date, TimeSpan.Zero).AddDays(dias);
+
+    /// <summary>O horário em UTC com <c>Z</c>, pronto para a query (sem o <c>+</c>, que a URL leria como espaço).</summary>
+    public static string Horario(DateTimeOffset instante) =>
+        Uri.EscapeDataString(instante.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"));
 
     /// <summary>O instante de hoje mais o deslocamento, com segundos cheios (o PostgreSQL guarda microssegundos).</summary>
     public static DateTimeOffset Daqui(TimeSpan deslocamento)

@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 
 namespace ReservaMakerspace.Api.Json;
 
@@ -10,24 +9,19 @@ namespace ReservaMakerspace.Api.Json;
 /// desenvolvimento), e a mesma reserva viraria dois horários diferentes (plano do 1.5, decisão 11). Vale também para
 /// <c>DateTimeOffset?</c>. A escrita é a padrão, para as respostas das rotas anteriores não mudarem.
 /// </summary>
-public sealed partial class ConversorDeDataComFuso : JsonConverter<DateTimeOffset>
+public sealed class ConversorDeDataComFuso : JsonConverter<DateTimeOffset>
 {
-    private const string Mensagem = "Use o formato ISO 8601 com o fuso, como 2026-12-01T10:00:00-03:00 ou 2026-12-01T13:00:00Z.";
-
-    [GeneratedRegex(@"^\d{4}-\d{2}-\d{2}T[\d:.,]+(Z|z|[+-]\d{2}:\d{2})$")]
-    private static partial Regex DataComHoraEFuso();
-
     public override DateTimeOffset Read(ref Utf8JsonReader reader, Type tipo, JsonSerializerOptions opcoes)
     {
         if (reader.TokenType != JsonTokenType.String)
         {
-            throw new JsonException(Mensagem);
+            throw new JsonException(HorarioComFuso.Mensagem);
         }
 
         var texto = reader.GetString();
-        if (texto is null || !DataComHoraEFuso().IsMatch(texto))
+        if (texto is null || !HorarioComFuso.TemFuso(texto))
         {
-            throw new JsonException(Mensagem);
+            throw new JsonException(HorarioComFuso.Mensagem);
         }
 
         try
@@ -36,7 +30,7 @@ public sealed partial class ConversorDeDataComFuso : JsonConverter<DateTimeOffse
         }
         catch (FormatException)
         {
-            throw new JsonException(Mensagem);
+            throw new JsonException(HorarioComFuso.Mensagem);
         }
     }
 
