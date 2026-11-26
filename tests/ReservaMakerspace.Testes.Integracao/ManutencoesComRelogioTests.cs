@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Time.Testing;
+using Npgsql;
 using ReservaMakerspace.Contratos.Manutencoes;
 using ReservaMakerspace.Contratos.Reservas;
 using ReservaMakerspace.Dominio;
@@ -208,6 +209,52 @@ public class ManutencoesComRelogioTests(BancosDeTeste bancos) : IClassFixture<Ba
         await RegistrarManutencaoOkAsync(equipe, maquina.Id, inicio, inicio.AddHours(2));
         var depois = Assert.Single(await ListarAsync(doDono, "/me/reservas"), r => r.Id == pessoal.Id);
         Assert.Equal(SituacaoDaReserva.CanceladaPorManutencao, depois.Situacao);
+    }
+
+    [Fact]
+    public async Task Restricao_de_exclusao_das_manutencoes_vira_409_sem_listas_e_desfaz_o_cancelamento()
+    {
+        await using var fabrica = new FabricaComInterceptador(await bancos.NovoBancoAsync());
+        var auxiliar = new AuxiliarDeReservas(fabrica.Contas);
+        var tipo = await auxiliar.CriarTipoAsync();
+        var maquina = await auxiliar.CriarMaquinaAsync(tipo.Id);
+        var dono = await auxiliar.PessoaTreinadaAsync(tipo.Id);
+        var equipePessoa = await auxiliar.EquipeAsync();
+        using var equipe = await auxiliar.ClienteDaEquipeAsync();
+        var inicio = Dia(2).AddHours(10);
+        using var doDono = fabrica.Contas.ClienteCom(dono.Token);
+        var pessoal = await ReservarOkAsync(doDono, maquina.Id, inicio, inicio.AddHours(1));
+
+        // No meio do pedido, depois de a máquina travada e a reserva cancelada, uma manutenção sobreposta entra por outra
+        // conexão (a checagem da chave estrangeira usa FOR KEY SHARE, que não conflita com a trava FOR NO KEY UPDATE).
+        // Só a restrição de exclusão pega o pedido.
+        fabrica.Interceptador.AntesDoInsertDeManutencao(async () =>
+        {
+            await using var fonte = NpgsqlDataSource.Create(fabrica.ConnectionString);
+            await using var comando = fonte.CreateCommand(
+                """
+                INSERT INTO manutencoes (id, equipamento_id, inicio, fim, motivo, situacao, registrada_em, registrada_por_id)
+                VALUES ($1, $2, $3, $4, 'De outra conexão.', 'Ativa', $5, $6)
+                """);
+            comando.Parameters.AddWithValue(Guid.NewGuid());
+            comando.Parameters.AddWithValue(maquina.Id);
+            comando.Parameters.AddWithValue(inicio.AddMinutes(30));
+            comando.Parameters.AddWithValue(inicio.AddHours(3));
+            comando.Parameters.AddWithValue(inicio);
+            comando.Parameters.AddWithValue(equipePessoa.Id);
+            await comando.ExecuteNonQueryAsync();
+        });
+        var resposta = await RegistrarManutencaoAsync(equipe, maquina.Id, inicio, inicio.AddHours(2));
+
+        Assert.Equal(HttpStatusCode.Conflict, resposta.StatusCode);
+        using var corpo = await Json.DocumentoAsync(resposta);
+        Assert.Equal(
+            "A máquina já tem uma manutenção ativa nesse horário.", corpo.RootElement.GetProperty("detail").GetString());
+        // A transação já falhou: sem a lista.
+        Assert.False(corpo.RootElement.TryGetProperty("manutencoes", out _));
+        // O cancelamento foi desfeito junto, e só a manutenção da outra conexão existe.
+        Assert.Equal(SituacaoDaReserva.Ativa, Assert.Single(await ListarAsync(doDono, "/me/reservas"), r => r.Id == pessoal.Id).Situacao);
+        Assert.Equal(1, await BancosDeTeste.ContarAsync(fabrica.ConnectionString, "SELECT count(*) FROM manutencoes"));
     }
 
     private static async Task<JsonDocument> LerAsync(HttpClient cliente, string rota)
