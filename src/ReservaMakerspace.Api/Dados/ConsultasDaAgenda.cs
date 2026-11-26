@@ -68,11 +68,16 @@ public static class ConsultasDaAgenda
     /// A consulta única de "máquinas livres" (plano do 1.6, decisão 4): as máquinas ativas do tipo sem reserva ativa que
     /// cruze <c>[inicio, fim)</c>, em ordem de nome. A disponibilidade e a criação da reserva usam esta; no 1.7 a
     /// manutenção entra aqui. Não trava nada: quem precisa de uma leitura estável decide isso por fora.
+    /// <paramref name="exceto"/> deixa de fora a máquina que o pedido de reserva quer: ela tem conflito, e por isso já
+    /// ficaria de fora sozinha, a não ser que a reserva em conflito seja cancelada no meio do pedido (pelo dono ou pela
+    /// revogação, que não travam a máquina). Sem este filtro, a trava 2 recusaria uma desmarcação por "outra" máquina
+    /// livre que é a própria máquina pedida.
     /// </summary>
     public static Task<List<EquipamentoResposta>> MaquinasLivresAsync(
-        this MakerspaceDbContext banco, Guid tipoId, DateTimeOffset inicio, DateTimeOffset fim) =>
+        this MakerspaceDbContext banco, Guid tipoId, DateTimeOffset inicio, DateTimeOffset fim, Guid? exceto = null) =>
         banco.Equipamentos.AsNoTracking()
             .Where(e => e.TipoId == tipoId
+                && e.Id != exceto
                 && e.Ativo
                 && !banco.Reservas.Any(r =>
                     r.EquipamentoId == e.Id

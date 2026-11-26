@@ -185,7 +185,7 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
         if (conflitos.Count > 0)
         {
             // Todo 409 de agenda traz as máquinas livres do tipo (decisão 4), com a mesma consulta da disponibilidade.
-            var livres = await banco.MaquinasLivresAsync(maquina.TipoId, reserva.Inicio, reserva.Fim);
+            var livres = await banco.MaquinasLivresAsync(maquina.TipoId, reserva.Inicio, reserva.Fim, exceto: equipamentoId);
             var visiveis = conflitos.Select(c => c.Visivel(eu, EhDaEquipe())).ToList();
 
             if (finalidade == FinalidadeDaReserva.ProjetoPessoal)
