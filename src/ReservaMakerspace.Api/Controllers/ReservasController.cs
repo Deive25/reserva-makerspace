@@ -210,9 +210,13 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
 
             // Todas as travas passaram: cancela as pessoais na mesma transação da criação, sob a trava da máquina.
             // O UPDATE só pega as ainda ativas: se o dono cancelou no meio, a vaga ficou livre de qualquer jeito e
-            // o motivo de quem cancelou primeiro fica (ADR 0006).
-            var ids = conflitos.Select(c => c.Id).ToList();
+            // o motivo de quem cancelou primeiro fica (ADR 0006). Antes do UPDATE, trava as linhas candidatas em ordem
+            // de id, a mesma ordem da revogação: dois UPDATEs de várias linhas sem ordem comum podem se esperar em ciclo.
+            var ids = conflitos.Select(c => c.Id).ToArray();
             var motivo = Reserva.Normalizar(pedido.MotivoDesmarcacao);
+            await banco.Database
+                .SqlQuery<Guid>($"""SELECT id AS "Value" FROM reservas WHERE id = ANY({ids}) AND situacao = 'Ativa' ORDER BY id FOR UPDATE""")
+                .ToListAsync();
             await banco.Reservas
                 .Where(r => ids.Contains(r.Id) && r.Situacao == SituacaoDaReserva.Ativa)
                 .ExecuteUpdateAsync(set => set
@@ -221,7 +225,6 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
                     .SetProperty(r => r.CanceladaPorId, eu)
                     .SetProperty(r => r.MotivoDoCancelamento, motivo));
         }
-
 
         banco.Reservas.Add(reserva);
         try
@@ -364,7 +367,6 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
 
         return new ObjectResult(problema) { StatusCode = StatusCodes.Status409Conflict };
     }
-
 
     private ObjectResult DeOutraPessoa() =>
         Problem(
