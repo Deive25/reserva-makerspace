@@ -6,6 +6,7 @@ using ReservaMakerspace.Api.Autenticacao;
 using ReservaMakerspace.Api.Dados;
 using ReservaMakerspace.Api.Erros;
 using ReservaMakerspace.Contratos.Equipamentos;
+using ReservaMakerspace.Contratos.Manutencoes;
 using ReservaMakerspace.Contratos.Reservas;
 using ReservaMakerspace.Dominio;
 
@@ -92,7 +93,7 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
     /// enxerga o que já foi confirmado quando começa, e por isso a leitura vem depois da trava (ADR 0006).
     /// Numa demanda do parque que cruza reservas pessoais, as travas da desmarcação (<see cref="Desmarcacao"/>) decidem se
     /// o pedido as cancela, na mesma transação e antes do <c>INSERT</c> da demanda (ADR 0007). Todo 409 de agenda traz também
-    /// as máquinas livres do tipo.
+    /// as máquinas livres do tipo e as manutenções ativas no intervalo (decisão 7 do plano do 1.7).
     /// </summary>
     [HttpPost]
     [ProducesResponseType<ReservaResposta>(StatusCodes.Status201Created)]
@@ -183,29 +184,34 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
             return Problem(statusCode: status, title: TitulosDeErro.Para(status), detail: erro.Message);
         }
 
-        // Regra 4, com a máquina travada: quem chegou antes já confirmou a reserva e aparece aqui.
+        // Regra 4, com a máquina travada: quem chegou antes já confirmou a reserva ou a manutenção e aparece aqui.
         var conflitos = await banco.ReservasAtivasQueCruzamAsync(equipamentoId, reserva.Inicio, reserva.Fim);
-        if (conflitos.Count > 0)
+        var manutencoes = await banco.ManutencoesAtivasQueCruzamAsync(equipamentoId, reserva.Inicio, reserva.Fim);
+        if (conflitos.Count > 0 || manutencoes.Count > 0)
         {
             // Todo 409 de agenda traz as máquinas livres do tipo (decisão 4), com a mesma consulta da disponibilidade.
             var livres = await banco.MaquinasLivresAsync(maquina.TipoId, reserva.Inicio, reserva.Fim, exceto: equipamentoId);
             var visiveis = conflitos.Select(c => c.Visivel(eu, EhDaEquipe())).ToList();
+            var haManutencao = manutencoes.Count > 0;
 
             if (finalidade == FinalidadeDaReserva.ProjetoPessoal)
             {
-                return ConflitoDaAgenda(visiveis, livres);
+                return ConflitoDaAgenda(
+                    visiveis, livres, manutencoes, haManutencao ? Desmarcacao.MensagemDaManutencao : Desmarcacao.MensagemDoConflito);
             }
 
             // Demanda do parque: as travas da desmarcação (§4.3), no domínio. Qualquer recusa é 409, porque o que
-            // impede a reserva continua sendo a agenda; a mensagem diz por que desmarcar não resolve.
+            // impede a reserva continua sendo a agenda; a mensagem diz por que desmarcar não resolve. Com uma manutenção
+            // no intervalo a trava 3 sempre recusa (plano do 1.7, decisão 8), mesmo sem nenhuma reserva em conflito.
             var recusa = Desmarcacao.Avaliar(
                 conflitos.Select(c => new ReservaEmConflito(c.Inicio, c.Finalidade)).ToList(),
                 pedido.MotivoDesmarcacao,
                 livres.FirstOrDefault()?.Nome,
-                agora);
+                agora,
+                haManutencao);
             if (recusa is not null)
             {
-                return ConflitoDaAgenda(visiveis, livres, recusa.Mensagem);
+                return ConflitoDaAgenda(visiveis, livres, manutencoes, recusa.Mensagem);
             }
 
             // Todas as travas passaram: cancela as pessoais na mesma transação da criação, sob a trava da máquina.
@@ -236,7 +242,7 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
         {
             // A garantia final do banco: só chega aqui um caminho que escapou da trava. A transação já falhou e não
             // aceita outra consulta: sem as duas listas (ADR 0006), e a desmarcação, se houve, é desfeita junto.
-            return ConflitoDaAgenda(null, null);
+            return ConflitoDaAgenda(null, null, null);
         }
 
         await transacao.CommitAsync();
@@ -342,12 +348,14 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
         : Papel.Usuario;
 
     /// <summary>
-    /// 409 de agenda. <paramref name="conflitos"/> e <paramref name="maquinasLivres"/> são <c>null</c> quando quem
-    /// recusou foi a restrição do banco. <paramref name="detalhe"/> traz a mensagem da trava que recusou a desmarcação.
+    /// 409 de agenda. <paramref name="conflitos"/>, <paramref name="maquinasLivres"/> e <paramref name="manutencoes"/> são
+    /// <c>null</c> quando quem recusou foi a restrição do banco; senão as três listas sempre saem, vazias quando não há nada
+    /// (plano do 1.7, decisão 7). <paramref name="detalhe"/> traz a mensagem da trava que recusou a desmarcação, ou a da manutenção.
     /// </summary>
     private ObjectResult ConflitoDaAgenda(
         List<ReservaNaAgenda>? conflitos,
         List<EquipamentoResposta>? maquinasLivres,
+        List<ManutencaoNaAgenda>? manutencoes,
         string detalhe = Desmarcacao.MensagemDoConflito)
     {
         var problema = ProblemDetailsFactory.CreateProblemDetails(
@@ -363,6 +371,11 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
         if (maquinasLivres is not null)
         {
             problema.Extensions["maquinasLivres"] = maquinasLivres;
+        }
+
+        if (manutencoes is not null)
+        {
+            problema.Extensions["manutencoes"] = manutencoes;
         }
 
         return new ObjectResult(problema) { StatusCode = StatusCodes.Status409Conflict };
