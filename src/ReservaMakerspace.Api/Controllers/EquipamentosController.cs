@@ -96,11 +96,10 @@ public class EquipamentosController(MakerspaceDbContext banco, TimeProvider relo
         if (desativando || trocandoDeTipo)
         {
             var agora = relogio.GetUtcNow();
-            var reservas = await banco.Reservas.AsNoTracking()
-                .Where(r => r.EquipamentoId == id && r.Situacao == SituacaoDaReserva.Ativa && r.Fim > agora)
-                .OrderBy(r => r.Inicio).ThenBy(r => r.Id)
-                .Select(r => new ConflitoDeAgenda(r.Inicio, r.Fim, r.Finalidade))
-                .ToListAsync();
+            var linhas = await banco.LinhasAsync(r =>
+                r.EquipamentoId == id && r.Situacao == SituacaoDaReserva.Ativa && r.Fim > agora);
+            // Só a Coordenação chega aqui: vê o id e o nome de todas.
+            var reservas = linhas.Select(l => l.Visivel(Guid.Empty, ehDaEquipe: true)).ToList();
             if (reservas.Count > 0)
             {
                 var problema = ProblemDetailsFactory.CreateProblemDetails(

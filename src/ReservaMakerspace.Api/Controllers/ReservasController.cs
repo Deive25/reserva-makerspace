@@ -175,17 +175,10 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
         }
 
         // Regra 4, com a máquina travada: quem chegou antes já confirmou a reserva e aparece aqui.
-        var conflitos = await banco.Reservas.AsNoTracking()
-            .Where(r => r.EquipamentoId == equipamentoId
-                && r.Situacao == SituacaoDaReserva.Ativa
-                && r.Inicio < reserva.Fim
-                && reserva.Inicio < r.Fim)
-            .OrderBy(r => r.Inicio).ThenBy(r => r.Id)
-            .Select(r => new ConflitoDeAgenda(r.Inicio, r.Fim, r.Finalidade))
-            .ToListAsync();
+        var conflitos = await banco.ReservasAtivasQueCruzamAsync(equipamentoId, reserva.Inicio, reserva.Fim);
         if (conflitos.Count > 0)
         {
-            return ConflitoDaAgenda(conflitos);
+            return ConflitoDaAgenda(conflitos.Select(c => c.Visivel(eu, EhDaEquipe())).ToList());
         }
 
         banco.Reservas.Add(reserva);
@@ -303,7 +296,7 @@ public class ReservasController(MakerspaceDbContext banco, TimeProvider relogio)
         : Papel.Usuario;
 
     /// <summary>409 de agenda. <paramref name="conflitos"/> é <c>null</c> quando quem recusou foi a restrição do banco.</summary>
-    private ObjectResult ConflitoDaAgenda(List<ConflitoDeAgenda>? conflitos)
+    private ObjectResult ConflitoDaAgenda(List<ReservaNaAgenda>? conflitos)
     {
         var problema = ProblemDetailsFactory.CreateProblemDetails(
             HttpContext,

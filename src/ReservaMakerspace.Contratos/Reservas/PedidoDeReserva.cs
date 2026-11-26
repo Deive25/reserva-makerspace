@@ -27,4 +27,11 @@ public class PedidoDeReserva
 
     [StringLength(500, ErrorMessage = "A descrição pode ter até 500 caracteres.")]
     public string? Descricao { get; set; }
+
+    /// <summary>
+    /// Só na demanda do parque. Com ele, o pedido desmarca as reservas pessoais em conflito, se as travas da §4.3
+    /// deixarem; um texto só com espaços vale como ausente.
+    /// </summary>
+    [StringLength(500, ErrorMessage = "O motivo da desmarcação pode ter até 500 caracteres.")]
+    public string? MotivoDesmarcacao { get; set; }
 }
