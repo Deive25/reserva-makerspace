@@ -17,8 +17,11 @@ public class DesmarcacaoTests
         new(T0 + comecaDaquiA, FinalidadeDaReserva.DemandaDoParque);
 
     private static RecusaDaDesmarcacao? Avaliar(
-        ReservaEmConflito[] conflitos, string? motivo = "Visita técnica.", string? maquinaLivre = null) =>
-        Desmarcacao.Avaliar(conflitos, motivo, maquinaLivre, Relogio.GetUtcNow());
+        ReservaEmConflito[] conflitos,
+        string? motivo = "Visita técnica.",
+        string? maquinaLivre = null,
+        bool haManutencao = false) =>
+        Desmarcacao.Avaliar(conflitos, motivo, maquinaLivre, Relogio.GetUtcNow(), haManutencao);
 
     [Fact]
     public void A_antecedencia_minima_e_de_24_horas()
@@ -88,6 +91,47 @@ public class DesmarcacaoTests
         var recusa = Avaliar([Pessoal(TimeSpan.FromDays(3)), Demanda(TimeSpan.FromDays(3))]);
 
         Assert.Equal(TravaDaDesmarcacao.DemandaNaoSeDesmarca, recusa?.Trava);
+    }
+
+    [Fact]
+    public void A_manutencao_recusa_com_motivo_mesmo_longe_e_sem_outra_trava()
+    {
+        var recusa = Avaliar([Pessoal(TimeSpan.FromDays(3))], haManutencao: true);
+
+        Assert.NotNull(recusa);
+        Assert.Equal(TravaDaDesmarcacao.ManutencaoNaoSeDesmarca, recusa.Trava);
+        Assert.Equal("Uma manutenção não se desmarca.", recusa.Mensagem);
+    }
+
+    [Fact]
+    public void A_manutencao_recusa_mesmo_sem_nenhuma_reserva_em_conflito()
+    {
+        var recusa = Avaliar([], haManutencao: true);
+
+        Assert.Equal(TravaDaDesmarcacao.ManutencaoNaoSeDesmarca, recusa?.Trava);
+    }
+
+    [Fact]
+    public void A_manutencao_vem_antes_da_demanda_da_antecedencia_e_da_maquina_livre()
+    {
+        var recusa = Avaliar(
+            [Demanda(TimeSpan.FromHours(1)), Pessoal(TimeSpan.FromHours(1))],
+            maquinaLivre: "Impressora FDM 2",
+            haManutencao: true);
+
+        Assert.Equal(TravaDaDesmarcacao.ManutencaoNaoSeDesmarca, recusa?.Trava);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public void Sem_motivo_a_manutencao_volta_como_409_simples_com_a_mensagem_da_manutencao(string? motivo)
+    {
+        var recusa = Avaliar([Demanda(TimeSpan.FromHours(1))], motivo, haManutencao: true);
+
+        Assert.NotNull(recusa);
+        Assert.Equal(TravaDaDesmarcacao.MotivoObrigatorio, recusa.Trava);
+        Assert.Equal("A máquina está em manutenção nesse horário.", recusa.Mensagem);
     }
 
     [Fact]

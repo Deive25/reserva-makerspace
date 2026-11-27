@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using ReservaMakerspace.Contratos.Equipamentos;
+using ReservaMakerspace.Contratos.Manutencoes;
 using ReservaMakerspace.Contratos.Reservas;
 using ReservaMakerspace.Contratos.Treinamentos;
 using ReservaMakerspace.Dominio;
@@ -111,6 +112,30 @@ public sealed class AuxiliarDeReservas(AuxiliarDeContas contas)
 
     public static Task<HttpResponseMessage> CancelarAsync(HttpClient cliente, Guid reservaId) =>
         cliente.PostAsync($"/reservas/{reservaId}/cancelamento", content: null, TestContext.Current.CancellationToken);
+
+    public static Task<HttpResponseMessage> RegistrarManutencaoAsync(
+        HttpClient cliente,
+        Guid equipamentoId,
+        DateTimeOffset? inicio,
+        DateTimeOffset fim,
+        string motivo = "Troca do bico.") =>
+        cliente.PostAsJsonAsync(
+            $"/equipamentos/{equipamentoId}/manutencoes", new { inicio, fim, motivo }, TestContext.Current.CancellationToken);
+
+    public static async Task<ManutencaoResposta> RegistrarManutencaoOkAsync(
+        HttpClient cliente,
+        Guid equipamentoId,
+        DateTimeOffset? inicio,
+        DateTimeOffset fim,
+        string motivo = "Troca do bico.")
+    {
+        var resposta = await RegistrarManutencaoAsync(cliente, equipamentoId, inicio, fim, motivo);
+        Assert.Equal(HttpStatusCode.Created, resposta.StatusCode);
+        return await Json.LerAsync<ManutencaoResposta>(resposta);
+    }
+
+    public static Task<HttpResponseMessage> EncerrarManutencaoAsync(HttpClient cliente, Guid manutencaoId) =>
+        cliente.PostAsync($"/manutencoes/{manutencaoId}/encerramento", content: null, TestContext.Current.CancellationToken);
 
     public static async Task<List<ReservaResposta>> ListarAsync(HttpClient cliente, string rota)
     {

@@ -74,9 +74,10 @@ public class EquipamentosController(MakerspaceDbContext banco, TimeProvider relo
     }
 
     /// <summary>
-    /// As reservas ativas que cruzam <c>[de, ate)</c>, inclusive a que começou antes e a que acaba depois, em ordem de
-    /// início. Uma máquina inativa também tem agenda. A janela é de até 31 dias (§5). O id e o nome do operador seguem a
-    /// regra da decisão 3: a Equipe vê todos, o Usuário só os das reservas dele.
+    /// As reservas ativas e as manutenções ativas que cruzam <c>[de, ate)</c>, inclusive a que começou antes e a que acaba
+    /// depois, em ordem de início. Uma máquina inativa também tem agenda. A janela é de até 31 dias (§5). O id e o nome do
+    /// operador seguem a regra da decisão 3: a Equipe vê todos, o Usuário só os das reservas dele. A manutenção é igual para
+    /// todo mundo: id, início, fim e motivo, sem o nome de quem registrou (plano do 1.7, decisão 10).
     /// </summary>
     [HttpGet("{id:guid}/agenda")]
     [ProducesResponseType<AgendaResposta>(StatusCodes.Status200OK)]
@@ -109,6 +110,7 @@ public class EquipamentosController(MakerspaceDbContext banco, TimeProvider relo
         }
 
         var linhas = await banco.ReservasAtivasQueCruzamAsync(id, de!.Value, ate!.Value);
+        var manutencoes = await banco.ManutencoesAtivasQueCruzamAsync(id, de.Value, ate.Value);
         var eu = Guid.Parse(User.FindFirstValue("sub")!);
         var ehDaEquipe = User.IsInRole(nameof(Papel.Equipe)) || User.IsInRole(nameof(Papel.Coordenacao));
         return Ok(new AgendaResposta(
@@ -116,7 +118,8 @@ public class EquipamentosController(MakerspaceDbContext banco, TimeProvider relo
             maquina.Nome,
             de.Value.ToUniversalTime(),
             ate.Value.ToUniversalTime(),
-            linhas.Select(l => l.Visivel(eu, ehDaEquipe)).ToList()));
+            linhas.Select(l => l.Visivel(eu, ehDaEquipe)).ToList(),
+            manutencoes));
     }
 
 

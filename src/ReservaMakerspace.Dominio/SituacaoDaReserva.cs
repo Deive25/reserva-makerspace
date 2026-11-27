@@ -9,4 +9,5 @@ public enum SituacaoDaReserva
     Ativa,
     CanceladaPeloDono,
     CanceladaPelaEquipe,
+    CanceladaPorManutencao,
 }
